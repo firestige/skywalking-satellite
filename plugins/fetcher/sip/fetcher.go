@@ -18,6 +18,7 @@
 package sip
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -25,16 +26,18 @@ import (
 	"log"
 	"time"
 
-	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
-
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/afpacket"
 	"github.com/google/gopacket/layers"
+	"google.golang.org/protobuf/proto"
+	v3_common "skywalking.apache.org/repo/goapi/collect/common/v3"
+	v3 "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
+	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	forwarder "github.com/apache/skywalking-satellite/plugins/forwarder/api"
-	forwarder_grpc "github.com/apache/skywalking-satellite/plugins/forwarder/grpc"
-	forwarder_kafka "github.com/apache/skywalking-satellite/plugins/forwarder/kafka"
+	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativelog"
+	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativetracing"
 )
 
 const (
@@ -84,32 +87,99 @@ func (f *Fetcher) Prepare() {
 	}
 }
 
+// Fetch captures SIP packets from the network interface and processes them.
+// Use HTTP instead of SIP temporarily for packet capture process verification.
 func (f *Fetcher) Fetch(ctx context.Context) {
+	go f.fetch_http(ctx)
+}
+
+func (f *Fetcher) fetch(ctx context.Context) {
 	packetSource := gopacket.NewPacketSource(f.Handle, layers.LinkTypeEthernet)
 	for packet := range packetSource.Packets() {
 		if sipLayer := packet.Layer(layers.LayerTypeSIP); sipLayer != nil {
-			s, ok := sipLayer.(*layers.SIP)
+			_, ok := sipLayer.(*layers.SIP)
 			if !ok {
 				continue
 			}
 
-			// 提取SIP消息的关键信息
-			timestamp := packet.Metadata().Timestamp
-			srcIP, dstIP := extractIPs(packet)
-
-			// Create segment with SIP data
-
-			sniffData := &v1.SniffData{
-				Name: "sipraw-" + generateTraceSegmentID(), // Unique identifier for the SIP message
-				Data: &v1.SniffData_Segment{
-					Segment: segment,
-				},
-			}
-
 			select {
-			case f.OutputChannel <- sniffData:
+			case f.OutputChannel <- nil:
 			case <-ctx.Done():
 				return
+			}
+		}
+	}
+}
+
+func isHttp(payload []byte) bool {
+	// 简单检查HTTP请求的特征
+	if len(payload) < 4 {
+		return false
+	}
+	// 检查是否以"GET "、"POST "等HTTP方法开头
+	return bytes.HasPrefix(payload, []byte("GET ")) ||
+		bytes.HasPrefix(payload, []byte("POST ")) ||
+		bytes.Contains(payload, []byte("\nHost: ")) ||
+		bytes.Contains(payload, []byte("HTTP/1."))
+}
+
+func (f *Fetcher) fetch_http(ctx context.Context) {
+	packetSource := gopacket.NewPacketSource(f.Handle, layers.LinkTypeEthernet)
+	for packet := range packetSource.Packets() {
+		if applicationLayer := packet.ApplicationLayer(); applicationLayer != nil {
+			// 处理HTTP数据包
+			payload := applicationLayer.LayerPayload()
+			if len(payload) > 0 && isHttp(payload) {
+				segment := &v3.SegmentObject{
+					TraceSegmentId:  generateTraceSegmentID(),
+					Service:         "sip-fetcher",
+					ServiceInstance: "test-instance",
+					Spans: []*v3.SpanObject{
+						{
+							SpanId:        1,
+							ParentSpanId:  1,
+							OperationName: "HTTP Request",
+							StartTime:     generateTimeBucket(time.Now()),
+							EndTime:       generateTimeBucket(time.Now().Add(100 * time.Millisecond)), // 模拟100ms的处理时间
+							Tags: []*v3_common.KeyStringValuePair{
+								{
+									Key:   "http.method",
+									Value: string(payload[:4]), // 假设HTTP方法在前4个字节
+								},
+								{
+									Key:   "http.url",
+									Value: "http://example.com", // 模拟URL
+								},
+								{
+									Key:   "http.status_code",
+									Value: "200", // 模拟状态码
+								},
+							},
+						},
+					},
+				}
+				segmentBytes, err := proto.Marshal(segment)
+				if err != nil {
+					log.Printf("Error marshaling segment: %v", err)
+					continue
+				}
+				// 创建一个新的SniffData对象
+				e := &v1.SniffData{
+					Name:      "http-packet-trace",
+					Timestamp: time.Now().UnixNano() / 1e6, // 毫秒级时间戳
+					Meta:      nil,
+					Type:      v1.SniffType_TracingType,
+					Remote:    false,
+					Data: &v1.SniffData_Segment{
+						Segment: segmentBytes,
+					},
+				}
+
+				select {
+				case f.OutputChannel <- e:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}
@@ -135,8 +205,8 @@ func (f *Fetcher) SupportForwarders() []forwarder.Forwarder {
 	// Return a list of forwarders that this fetcher supports.
 	// This is a placeholder; actual implementation should return the forwarders that can handle SIP data.
 	return []forwarder.Forwarder{
-		new(forwarder_grpc.Forwarder),  // For sending to OAP
-		new(forwarder_kafka.Forwarder), // For async storage
+		new(nativetracing.Forwarder), // For sending tracing data to OAP
+		new(nativelog.Forwarder),     // For sip raw data logging
 	}
 }
 

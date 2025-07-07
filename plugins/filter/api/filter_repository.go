@@ -21,6 +21,7 @@ import (
 	"reflect"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/plugin"
+	"github.com/apache/skywalking-satellite/plugins/filter/sip"
 )
 
 // GetFilter an initialized filter plugin.
@@ -33,6 +34,7 @@ func RegisterFilterPlugins() {
 	plugin.RegisterPluginCategory(reflect.TypeOf((*Filter)(nil)).Elem())
 	filters := []Filter{
 		// Please register the filter plugins at here.
+		new(sip.Filter),
 	}
 	for _, filter := range filters {
 		plugin.RegisterPlugin(filter)
