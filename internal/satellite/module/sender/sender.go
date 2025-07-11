@@ -241,10 +241,13 @@ func (s *Sender) consume(batch *buffer.BatchBuffer) {
 		}
 	}
 	for _, f := range s.runningForwarders {
+		log.Logger.Infof("sender invoke forwarder: %s", f.ShowName())
 		for t, batchEvents := range events {
+			log.Logger.Infof("type is: %s", t.String())
 			if f.ForwardType() != t {
 				continue
 			}
+			log.Logger.Info("forwardType match, consum msg")
 			if err := f.Forward(batchEvents); err == nil {
 				s.sendCounter.Add(float64(len(batchEvents)), s.config.PipeName, "success", f.ForwardType().String())
 				continue

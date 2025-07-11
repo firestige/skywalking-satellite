@@ -127,28 +127,38 @@ sharing:
         # The timeout for unary stream request
         stream: ${SATELLITE_GRPC_TIMEOUT_STREAM:20s}
   servers:
-    - plugin_name: "grpc-server"
-      # The address of grpc server.
-      address: ${SATELLITE_GRPC_ADDRESS:":11800"}
-      # The TLS cert file path.
-      tls_cert_file: ${SATELLITE_GRPC_TLS_CERT_FILE:""}
-      # The TLS key file path.
-      tls_key_file: ${SATELLITE_GRPC_TLS_KEY_FILE:""}
-      # To Accept Connection Limiter when reach the resource
-      accept_limit:
-        # The max CPU utilization limit
-        cpu_utilization: ${SATELLITE_GRPC_ACCEPT_LIMIT_CPU_UTILIZATION:75}
-        # The max connection count
-        connection_count: ${SATELLITE_GRPC_ACCEPT_LIMIT_CONNECTION_COUNT:4000}
+    - plugin_name: "afpacket-server"
+      # The network interface name for capturing packets.
+      nic_name: ${SATELLITE_AF_PACKET_NIC_NAME:eth0}
+      # The frame size for packet capture, default is 65536 bytes.
+      frame_size: ${SATELLITE_AF_PACKET_FRAME_SIZE:65536}
+      # The BPF filter to capture specific types of packets, e.g., "tcp or udp or icmp or icmp6 or ip or ipv6".
+      bpf_filter: ${SATELLITE_AF_PACKET_BPF_FILTER:"tcp port 80"}
+      # # The event loop size for processing packets.
+      # event_loop_size: ${SATELLITE_AF_PACKET_EVENT_LOOP_SIZE:1024}
+    # - plugin_name: "grpc-server"
+    #   # The address of grpc server.
+    #   address: ${SATELLITE_GRPC_ADDRESS:":11800"}
+    #   # The TLS cert file path.
+    #   tls_cert_file: ${SATELLITE_GRPC_TLS_CERT_FILE:""}
+    #   # The TLS key file path.
+    #   tls_key_file: ${SATELLITE_GRPC_TLS_KEY_FILE:""}
+    #   # To Accept Connection Limiter when reach the resource
+    #   accept_limit:
+    #     # The max CPU utilization limit
+    #     cpu_utilization: ${SATELLITE_GRPC_ACCEPT_LIMIT_CPU_UTILIZATION:75}
+    #     # The max connection count
+    #     connection_count: ${SATELLITE_GRPC_ACCEPT_LIMIT_CONNECTION_COUNT:4000}
+  
 
 # The working pipe configurations.
 pipes:
   - common_config:
       pipe_name: "sip-capture-pipe"
     gatherer:
-      server_name: "capture-server"
-      fetcher:
-        plugin_name: "sip-fetcher"
+      server_name: "afpacket-server"
+      receiver:
+        plugin_name: "net-capture-receiver"
       queue:
         plugin_name: "memory-queue"
         # The maximum buffer event size.
@@ -157,7 +167,6 @@ pipes:
         partition: ${SATELLITE_QUEUE_PARTITION:4}
     processor:
       filters:
-        - plugin_name: "sip-filter"
     sender:
       fallbacker:
         plugin_name: "none-fallbacker"
@@ -170,7 +179,6 @@ pipes:
       client_name: grpc-client
       forwarders:
         - plugin_name: "native-log-grpc-forwarder"
-        - plugin_name: "native-tracing-grpc-forwarder"
   # - common_config:
   #     pipe_name: logpipe
   #   gatherer:

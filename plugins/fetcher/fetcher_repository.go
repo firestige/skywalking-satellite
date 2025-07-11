@@ -22,15 +22,12 @@ import (
 
 	"github.com/apache/skywalking-satellite/internal/pkg/plugin"
 	"github.com/apache/skywalking-satellite/plugins/fetcher/api"
-	"github.com/apache/skywalking-satellite/plugins/fetcher/sip"
 )
 
 // RegisterFetcherPlugins register the used fetcher plugins.
 func RegisterFetcherPlugins() {
 	plugin.RegisterPluginCategory(reflect.TypeOf((*api.Fetcher)(nil)).Elem())
-	fetchers := []api.Fetcher{
-		new(sip.Fetcher),
-	}
+	fetchers := []api.Fetcher{}
 	for _, fetcher := range fetchers {
 		plugin.RegisterPlugin(fetcher)
 	}

@@ -1,8 +1,8 @@
 module github.com/apache/skywalking-satellite
 
-go 1.23.0
+go 1.24
 
-toolchain go1.23.6
+toolchain go1.24.3
 
 require (
 	github.com/Shopify/sarama v1.27.2
@@ -24,7 +24,7 @@ require (
 	google.golang.org/protobuf v1.36.6
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/apimachinery v0.26.2
-	skywalking.apache.org/repo/goapi v0.0.0-20241106011455-ef3dbfac3128
+	skywalking.apache.org/repo/goapi v0.0.0-20250520033135-e237d585745f
 )
 
 require (
@@ -169,12 +169,12 @@ require (
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
 	golang.org/x/crypto v0.38.0 // indirect
-	golang.org/x/net v0.40.0 // indirect
+	golang.org/x/net v0.40.0
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.32.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250324211829-b45e905df463 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250505200425-f936aa4a68b2 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/jcmturner/aescts.v1 v1.0.1 // indirect
 	gopkg.in/jcmturner/dnsutils.v1 v1.0.1 // indirect

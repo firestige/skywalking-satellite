@@ -23,7 +23,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/gopacket"
@@ -54,6 +56,7 @@ type Fetcher struct {
 	Handle *afpacket.TPacket
 	// OutputChannel is the channel where fetched SIP data will be sent.
 	OutputChannel chan *v1.SniffData
+	prepareOnce   sync.Once // Ensure Prepare is called only once
 }
 
 func (f *Fetcher) Name() string {
@@ -90,6 +93,12 @@ func (f *Fetcher) Prepare() {
 // Fetch captures SIP packets from the network interface and processes them.
 // Use HTTP instead of SIP temporarily for packet capture process verification.
 func (f *Fetcher) Fetch(ctx context.Context) {
+	fmt.Println("Starting SIP Fetcher...")
+	// f.prepareOnce.Do(f.Prepare) // 确保Prepare只被调用一次
+	if f.Handle == nil {
+		fmt.Println("Fetcher not prepared, calling Prepare...")
+		f.Prepare() // 确保在Fetch之前调用Prepare
+	}
 	go f.fetch_http(ctx)
 }
 
@@ -174,6 +183,8 @@ func (f *Fetcher) fetch_http(ctx context.Context) {
 						Segment: segmentBytes,
 					},
 				}
+
+				fmt.Printf("Captured HTTP packet: %s\n", payload[:20]) // 打印前20个字节的HTTP数据包内容
 
 				select {
 				case f.OutputChannel <- e:

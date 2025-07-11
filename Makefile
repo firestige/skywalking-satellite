@@ -45,7 +45,7 @@ GQL_GEN = $(GO_PATH)/bin/gqlgen
 
 PLATFORMS := linux darwin windows
 os = $(word 1, $@)
-ARCH = amd64
+ARCH = arm64
 
 SHELL = /bin/bash
 
@@ -98,7 +98,7 @@ release:
 .PHONY: $(PLATFORMS)
 $(PLATFORMS):
 	mkdir -p $(OUT_DIR)
-	GOOS=$(os) GOARCH=$(ARCH) $(GO_BUILD) $(GO_BUILD_FLAGS) -ldflags "$(GO_BUILD_LDFLAGS)" -o $(OUT_DIR)/$(BINARY)-$(VERSION)-$(os)-$(ARCH) ./cmd
+	GOOS=linux GOARCH=arm64 $(GO_BUILD) $(GO_BUILD_FLAGS) -ldflags "$(GO_BUILD_LDFLAGS)" -o $(OUT_DIR)/$(BINARY)-$(VERSION)-$(os)-$(ARCH) ./cmd
 
 docker: PLATFORMS =
 docker: LOAD_OR_PUSH = --load

@@ -77,6 +77,7 @@ func (f *Forwarder) Forward(batch event.BatchEvents) error {
 		if !ok {
 			continue
 		}
+		log.Logger.Printf("get one log item: %s", data.LogList.GetLogs())
 		stream, err := f.logClient.Collect(context.Background())
 		if err != nil {
 			log.Logger.Errorf("open grpc stream error %v", err)
@@ -91,6 +92,7 @@ func (f *Forwarder) Forward(batch event.BatchEvents) error {
 				streamClosed = true
 				break
 			}
+			log.Logger.Print("send log")
 		}
 
 		if !streamClosed {

@@ -41,6 +41,7 @@ import (
 	grpcnativetracing "github.com/apache/skywalking-satellite/plugins/receiver/grpc/nativetracing"
 	"github.com/apache/skywalking-satellite/plugins/receiver/grpc/otlpmetricsv1"
 	httpnavtivelog "github.com/apache/skywalking-satellite/plugins/receiver/http/nativcelog"
+	localnetcapture "github.com/apache/skywalking-satellite/plugins/receiver/local/netcapture"
 )
 
 // RegisterReceiverPlugins register the used receiver plugins.
@@ -67,6 +68,7 @@ func RegisterReceiverPlugins() {
 		new(otlpmetricsv1.Receiver),
 		new(grpcnativeebpfaccesslog.Receiver),
 		new(grpcasyncprofiler.Receiver),
+		new(localnetcapture.Receiver),
 	}
 	for _, receiver := range receivers {
 		plugin.RegisterPlugin(receiver)
