@@ -25,7 +25,7 @@ import (
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
-	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
 )
 
 const (
@@ -45,11 +45,11 @@ type Server struct {
 	DropThreshold int           `mapstructure:"drop_threshold"` // Drop count threshold for reporting
 
 	// Core components
-	capture    PacketCapture
-	eventLoop  EventLoop
-	handlerMgr HandlerManager
-	pipeline   DataPipeline
-	monitoring MonitoringManager
+	capture    types.PacketCapture
+	eventLoop  types.EventLoop
+	handlerMgr types.HandlerManager
+	pipeline   types.DataPipeline
+	monitoring types.MonitoringManager
 
 	// Lifecycle management
 	ctx     context.Context
@@ -164,7 +164,7 @@ func (s *Server) GetServer() interface{} {
 	return s
 }
 
-func (s *Server) RegisterHandler(protocol string, handler func(*v1.SniffData) error) error {
+func (s *Server) RegisterHandler(protocol string, handler func(*types.RawFrameData) error) error {
 	return s.pipeline.SetDataProcessor(protocol, handler)
 }
 

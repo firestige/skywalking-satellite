@@ -18,19 +18,17 @@
 package handler
 
 import (
-	"time"
-
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
 	"github.com/google/gopacket"
-	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
 )
 
 // httpHandler implements PacketHandler for HTTP packets
 type httpHandler struct {
-	stats HandlerStats
+	stats types.HandlerStats
 }
 
 // NewHTTPHandler creates a new HTTP packet handler
-func NewHTTPHandler() PacketHandler {
+func NewHTTPHandler() types.PacketHandler {
 	return &httpHandler{}
 }
 
@@ -50,19 +48,13 @@ func (h *httpHandler) Type() string {
 	return "http"
 }
 
-func (h *httpHandler) Handle(packet gopacket.Packet) ([]*v1.SniffData, error) {
+func (h *httpHandler) Handle(packet gopacket.Packet) ([]*types.RawFrameData, error) {
 	// TODO: Extract HTTP data from packet and create SniffData
 	// This is a placeholder implementation
 
-	sniffData := &v1.SniffData{
-		// TODO: Populate with actual HTTP data
-		Name:      "http-data",
-		Timestamp: time.Now().UnixNano(),
-	}
-
-	return []*v1.SniffData{sniffData}, nil
+	return nil, nil
 }
 
-func (h *httpHandler) Stats() HandlerStats {
+func (h *httpHandler) Stats() types.HandlerStats {
 	return h.stats
 }

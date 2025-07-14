@@ -2,7 +2,8 @@ package handler
 
 import (
 	"github.com/google/gopacket"
-	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
+
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
 )
 
 const (
@@ -12,10 +13,10 @@ const (
 )
 
 type eslHandler struct {
-	stats HandlerStats
+	stats types.HandlerStats
 }
 
-func NewESLHandler() PacketHandler {
+func NewESLHandler() types.PacketHandler {
 	return &eslHandler{}
 }
 
@@ -31,10 +32,10 @@ func (e *eslHandler) Type() string {
 	return Protocol
 }
 
-func (e *eslHandler) Stats() HandlerStats {
+func (e *eslHandler) Stats() types.HandlerStats {
 	return e.stats
 }
 
-func (e *eslHandler) Handle(packet gopacket.Packet) ([]*v1.SniffData, error) {
+func (e *eslHandler) Handle(packet gopacket.Packet) ([]*types.RawFrameData, error) {
 	return nil, nil
 }

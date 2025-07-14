@@ -23,14 +23,14 @@ import (
 	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
-	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
 )
 
 // dataPipeline implements DataPipeline interface
 type dataPipeline struct {
 	// Multiple independent pipelines for different data types
 	pipelines map[string]*pipeline
-	handlers  map[string]DataProcessor
+	handlers  map[string]types.DataProcessor
 	mu        sync.RWMutex
 
 	// Configuration
@@ -38,23 +38,23 @@ type dataPipeline struct {
 	maxWorkers        int
 
 	// Statistics
-	stats PipelineStats
+	stats types.PipelineStats
 }
 
 // pipeline represents a single data processing pipeline
 type pipeline struct {
 	name       string
-	dataChan   chan []*v1.SniffData
+	dataChan   chan []*types.RawFrameData
 	workerPool chan struct{}
-	stats      PipelineStats
+	stats      types.PipelineStats
 	mu         sync.RWMutex
 }
 
 // NewDataPipeline creates a new data pipeline
-func NewDataPipeline() DataPipeline {
+func NewDataPipeline() types.DataPipeline {
 	return &dataPipeline{
 		pipelines:         make(map[string]*pipeline),
-		handlers:          make(map[string]DataProcessor),
+		handlers:          make(map[string]types.DataProcessor),
 		defaultBufferSize: 1000,
 		maxWorkers:        10,
 	}
@@ -107,7 +107,7 @@ func (d *dataPipeline) Close() error {
 	return nil
 }
 
-func (d *dataPipeline) Submit(sniffData []*v1.SniffData) error {
+func (d *dataPipeline) Submit(sniffData []*types.RawFrameData) error {
 	if len(sniffData) == 0 {
 		return nil
 	}
@@ -140,12 +140,12 @@ func (d *dataPipeline) Submit(sniffData []*v1.SniffData) error {
 	}
 }
 
-func (d *dataPipeline) GetStats() PipelineStats {
+func (d *dataPipeline) GetStats() types.PipelineStats {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
 	// Aggregate stats from all pipelines
-	totalStats := PipelineStats{}
+	totalStats := types.PipelineStats{}
 	for _, pipeline := range d.pipelines {
 		pipeline.mu.RLock()
 		totalStats.ItemsProcessed += pipeline.stats.ItemsProcessed
@@ -158,7 +158,7 @@ func (d *dataPipeline) GetStats() PipelineStats {
 	return totalStats
 }
 
-func (d *dataPipeline) SetDataProcessor(name string, processor DataProcessor) error {
+func (d *dataPipeline) SetDataProcessor(name string, processor types.DataProcessor) error {
 	p := d.pipelines[name]
 	if p == nil {
 		return fmt.Errorf("pipeline %s not found", name)
@@ -169,7 +169,7 @@ func (d *dataPipeline) SetDataProcessor(name string, processor DataProcessor) er
 }
 
 func (d *dataPipeline) ClearDataProcessor() error {
-	d.handlers = make(map[string]DataProcessor)
+	d.handlers = make(map[string]types.DataProcessor)
 	log.Logger.Info("cleared all data processors")
 	return nil
 }
@@ -178,7 +178,7 @@ func (d *dataPipeline) initializePipelines() error {
 	// Create default pipeline
 	defaultPipeline := &pipeline{
 		name:       "default",
-		dataChan:   make(chan []*v1.SniffData, d.defaultBufferSize),
+		dataChan:   make(chan []*types.RawFrameData, d.defaultBufferSize),
 		workerPool: make(chan struct{}, d.maxWorkers),
 	}
 
@@ -187,7 +187,7 @@ func (d *dataPipeline) initializePipelines() error {
 	// Initialize HTTP pipeline
 	httpPipeline := &pipeline{
 		name:       "http",
-		dataChan:   make(chan []*v1.SniffData, d.defaultBufferSize),
+		dataChan:   make(chan []*types.RawFrameData, d.defaultBufferSize),
 		workerPool: make(chan struct{}, d.maxWorkers),
 	}
 
@@ -196,7 +196,7 @@ func (d *dataPipeline) initializePipelines() error {
 	// Initialize TCP pipeline
 	tcpPipeline := &pipeline{
 		name:       "tcp",
-		dataChan:   make(chan []*v1.SniffData, d.defaultBufferSize),
+		dataChan:   make(chan []*types.RawFrameData, d.defaultBufferSize),
 		workerPool: make(chan struct{}, d.maxWorkers),
 	}
 
@@ -230,28 +230,28 @@ func (d *dataPipeline) runPipeline(ctx context.Context, p *pipeline) {
 	}
 }
 
-func (d *dataPipeline) processData(p *pipeline, data []*v1.SniffData) error {
+func (d *dataPipeline) processData(p *pipeline, datas []*types.RawFrameData) error {
 	// Acquire worker from pool
 	p.workerPool <- struct{}{}
 	defer func() { <-p.workerPool }()
 
 	// Process each SniffData
-	for _, sniffData := range data {
+	for _, rawData := range datas {
 		if handler, exists := d.handlers[p.name]; exists {
-			if err := handler(sniffData); err != nil {
-				log.Logger.Errorf("failed to process sniff data %s: %v", sniffData.Name, err)
+			if err := handler(rawData); err != nil {
+				log.Logger.Errorf("failed to process sniff data %s: %v", rawData.Protocol, err)
 				p.mu.Lock()
 				p.stats.ErrorCount++
 				p.mu.Unlock()
 			} else {
-				log.Logger.Debugf("processing sniff data: %s", sniffData.Name)
+				log.Logger.Debugf("processing sniff data: %s", rawData.Protocol)
 			}
 		}
 	}
 
 	// Update statistics
 	p.mu.Lock()
-	p.stats.ItemsProcessed += uint64(len(data))
+	p.stats.ItemsProcessed += uint64(len(datas))
 	p.stats.QueueDepth = uint64(len(p.dataChan))
 	p.mu.Unlock()
 

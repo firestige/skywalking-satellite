@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
 )
 
 // monitoringManager implements MonitoringManager interface
@@ -40,7 +41,7 @@ type monitoringManager struct {
 }
 
 // NewMonitoringManager creates a new monitoring manager
-func NewMonitoringManager(statsInterval time.Duration, dropThreshold int) MonitoringManager {
+func NewMonitoringManager(statsInterval time.Duration, dropThreshold int) types.MonitoringManager {
 	return &monitoringManager{
 		statsInterval: statsInterval,
 		dropThreshold: dropThreshold,

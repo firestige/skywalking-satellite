@@ -24,18 +24,19 @@ import (
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/handler"
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
 )
 
 // handlerManager implements HandlerManager interface
 type handlerManager struct {
-	handlers map[string]handler.PacketHandler
+	handlers map[string]types.PacketHandler
 	mu       sync.RWMutex
 }
 
 // NewHandlerManager creates a new handler manager
-func NewHandlerManager() HandlerManager {
+func NewHandlerManager() types.HandlerManager {
 	return &handlerManager{
-		handlers: make(map[string]handler.PacketHandler),
+		handlers: make(map[string]types.PacketHandler),
 	}
 }
 
@@ -80,7 +81,7 @@ func (m *handlerManager) Close() error {
 	return nil
 }
 
-func (m *handlerManager) RegisterHandler(handler handler.PacketHandler) error {
+func (m *handlerManager) RegisterHandler(handler types.PacketHandler) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -107,11 +108,11 @@ func (m *handlerManager) UnregisterHandler(name string) error {
 	return nil
 }
 
-func (m *handlerManager) GetHandlers() []handler.PacketHandler {
+func (m *handlerManager) GetHandlers() []types.PacketHandler {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	handlers := make([]handler.PacketHandler, 0, len(m.handlers))
+	handlers := make([]types.PacketHandler, 0, len(m.handlers))
 	for _, handler := range m.handlers {
 		handlers = append(handlers, handler)
 	}
@@ -121,7 +122,7 @@ func (m *handlerManager) GetHandlers() []handler.PacketHandler {
 
 func (m *handlerManager) initializeDefaultHandlers() error {
 	// Define default handlers
-	handlers := []handler.PacketHandler{
+	handlers := []types.PacketHandler{
 		handler.NewHTTPHandler(),
 		handler.NewESLHandler(),
 	}

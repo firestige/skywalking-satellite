@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
@@ -36,7 +37,7 @@ type packetCapture struct {
 
 	handle       *pcap.Handle
 	packetSource *gopacket.PacketSource
-	stats        CaptureStats
+	stats        types.CaptureStats
 	mu           sync.RWMutex
 
 	// 添加包分发通道
@@ -45,7 +46,7 @@ type packetCapture struct {
 }
 
 // NewPacketCapture creates a new packet capture instance
-func NewPacketCapture(interfaceName string, bufferSize int, filter string) PacketCapture {
+func NewPacketCapture(interfaceName string, bufferSize int, filter string) types.PacketCapture {
 	return &packetCapture{
 		interfaceName: interfaceName,
 		bufferSize:    bufferSize,
@@ -104,7 +105,7 @@ func (p *packetCapture) Close() error {
 	return nil
 }
 
-func (p *packetCapture) GetStats() CaptureStats {
+func (p *packetCapture) GetStats() types.CaptureStats {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.stats

@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package afpacket
+package types
 
 import (
 	"context"
@@ -23,20 +23,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/handler"
 	"github.com/google/gopacket"
-	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
 )
 
 // DataProcessor defines the function signature for processing SniffData
-type DataProcessor func(*v1.SniffData) error
+type DataProcessor func(*RawFrameData) error
 
 // DataPipeline defines the interface for data pipeline
 type DataPipeline interface {
 	Prepare() error
 	Start(ctx context.Context, wg *sync.WaitGroup) error
 	Close() error
-	Submit([]*v1.SniffData) error
+	Submit([]*RawFrameData) error
 	GetStats() PipelineStats
 
 	// SetDataProcessor sets the data processor function
@@ -58,9 +56,9 @@ type HandlerManager interface {
 	Prepare() error
 	Start(ctx context.Context, wg *sync.WaitGroup) error
 	Close() error
-	RegisterHandler(handler.PacketHandler) error
+	RegisterHandler(PacketHandler) error
 	UnregisterHandler(name string) error
-	GetHandlers() []handler.PacketHandler
+	GetHandlers() []PacketHandler
 }
 
 // EventLoop defines the interface for event loop
@@ -91,6 +89,22 @@ type MonitoringManager interface {
 	RecordProcess(handlerName string, processingTime time.Duration)
 }
 
+// PacketHandler defines the interface for packet handlers
+type PacketHandler interface {
+	Handle(packet gopacket.Packet) ([]*RawFrameData, error)
+	Type() string
+	CanHandle(packet gopacket.Packet) bool
+	Name() string
+	Stats() HandlerStats
+}
+
+// HandlerStats contains statistics for packet handlers
+type HandlerStats struct {
+	PacketsHandled uint64
+	DataGenerated  uint64
+	ErrorCount     uint64
+}
+
 // CaptureStats contains statistics for packet capture
 type CaptureStats struct {
 	PacketsReceived uint64
@@ -111,7 +125,7 @@ type PipelineStats struct {
 type ServerStats struct {
 	CaptureStats  CaptureStats
 	PipelineStats PipelineStats
-	HandlerStats  map[string]handler.HandlerStats
+	HandlerStats  map[string]HandlerStats
 }
 
 // Config contains configuration for AFPacket server
@@ -121,4 +135,10 @@ type Config struct {
 	Filter             string `mapstructure:"filter"`
 	MaxWorkers         int    `mapstructure:"max_workers"`
 	PipelineBufferSize int    `mapstructure:"pipeline_buffer_size"`
+}
+
+type RawFrameData struct {
+	Protocol  string `mapstructure:"protocol"`
+	Content   []byte `mapstructure:"content"`
+	Timestamp int64  `mapstructure:"timestamp"`
 }

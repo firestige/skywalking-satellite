@@ -23,21 +23,22 @@ import (
 	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
 	"github.com/google/gopacket"
 )
 
 // eventLoop implements EventLoop interface
 type eventLoop struct {
-	capture    PacketCapture
-	handlerMgr HandlerManager
-	pipeline   DataPipeline
+	capture    types.PacketCapture
+	handlerMgr types.HandlerManager
+	pipeline   types.DataPipeline
 
 	running bool
 	mu      sync.RWMutex
 }
 
 // NewEventLoop creates a new event loop
-func NewEventLoop(capture PacketCapture, handlerMgr HandlerManager, pipeline DataPipeline) EventLoop {
+func NewEventLoop(capture types.PacketCapture, handlerMgr types.HandlerManager, pipeline types.DataPipeline) types.EventLoop {
 	return &eventLoop{
 		capture:    capture,
 		handlerMgr: handlerMgr,
@@ -105,14 +106,14 @@ func (e *eventLoop) ProcessPacket(packet gopacket.Packet) error {
 	// Process packet through each capable handler
 	for _, handler := range handlers {
 		if handler.CanHandle(packet) {
-			sniffData, err := handler.Handle(packet)
+			rawData, err := handler.Handle(packet)
 			if err != nil {
 				log.Logger.Errorf("handler %s failed to process packet: %v", handler.Name(), err)
 				continue
 			}
 
 			// Submit to pipeline for async processing
-			if err := e.pipeline.Submit(sniffData); err != nil {
+			if err := e.pipeline.Submit(rawData); err != nil {
 				log.Logger.Errorf("failed to submit data to pipeline: %v", err)
 			}
 		}

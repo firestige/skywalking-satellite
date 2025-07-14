@@ -16,6 +16,7 @@ require (
 	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.20.1
+	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.27.7
 	go.uber.org/automaxprocs v1.6.0
 	golang.org/x/mod v0.25.0
@@ -26,6 +27,8 @@ require (
 	k8s.io/apimachinery v0.26.2
 	skywalking.apache.org/repo/goapi v0.0.0-20241106011455-ef3dbfac3128
 )
+
+require github.com/pmezard/go-difflib v1.0.0 // indirect
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -84,7 +87,7 @@ require (
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
 	golang.org/x/crypto v0.38.0 // indirect
-	golang.org/x/net v0.40.0
+	golang.org/x/net v0.40.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/term v0.32.0 // indirect

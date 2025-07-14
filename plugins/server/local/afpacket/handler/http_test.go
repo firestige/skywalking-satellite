@@ -33,7 +33,7 @@ func TestHTTPHandler_Name(t *testing.T) {
 
 func TestHTTPHandler_GetType(t *testing.T) {
 	handler := NewHTTPHandler()
-	assert.Equal(t, "http", handler.GetType())
+	assert.Equal(t, "http", handler.Type())
 }
 
 func TestHTTPHandler_CanHandle(t *testing.T) {
@@ -66,12 +66,12 @@ func TestHTTPHandler_Handle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sniffData)
 	assert.Len(t, sniffData, 1)
-	assert.Equal(t, "http-data", sniffData[0].Name)
+	assert.Equal(t, "http-data", sniffData[0].Protocol)
 }
 
 func TestHTTPHandler_GetStats(t *testing.T) {
 	handler := NewHTTPHandler()
-	stats := handler.GetStats()
+	stats := handler.Stats()
 	assert.Equal(t, uint64(0), stats.PacketsHandled)
 	assert.Equal(t, uint64(0), stats.DataGenerated)
 	assert.Equal(t, uint64(0), stats.ErrorCount)

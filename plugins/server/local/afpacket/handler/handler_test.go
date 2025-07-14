@@ -20,25 +20,26 @@ package handler
 import (
 	"testing"
 
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestAllHandlers_Implementation(t *testing.T) {
-	handlers := []PacketHandler{
+	handlers := []types.PacketHandler{
 		NewHTTPHandler(),
-		NewTCPHandler(),
-		NewUDPHandler(),
+		NewSIPHandler(),
+		NewESLHandler(),
 	}
 
 	for _, handler := range handlers {
 		t.Run(handler.Name(), func(t *testing.T) {
 			// Test that all handlers implement the interface correctly
 			assert.NotEmpty(t, handler.Name())
-			assert.NotEmpty(t, handler.GetType())
-			assert.Equal(t, handler.Name(), handler.GetType())
+			assert.NotEmpty(t, handler.Type())
+			assert.Equal(t, handler.Name(), handler.Type())
 
 			// Test stats
-			stats := handler.GetStats()
+			stats := handler.Stats()
 			assert.Equal(t, uint64(0), stats.PacketsHandled)
 			assert.Equal(t, uint64(0), stats.DataGenerated)
 			assert.Equal(t, uint64(0), stats.ErrorCount)

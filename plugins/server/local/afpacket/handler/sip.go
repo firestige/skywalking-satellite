@@ -19,18 +19,24 @@ package handler
 
 import (
 	"github.com/google/gopacket"
-	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
+	"github.com/google/gopacket/layers"
+
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
 )
 
 type sipHandler struct {
-	stats HandlerStats
+	stats types.HandlerStats
 }
 
-func NewSipHandler() PacketHandler {
+func NewSIPHandler() types.PacketHandler {
 	return &sipHandler{}
 }
 
 func (s *sipHandler) CanHandle(packet gopacket.Packet) bool {
+	if sip := packet.Layer(layers.LayerTypeSIP); sip != nil {
+		return true // 简单实现，实际需要更复杂的逻辑
+	}
+	// 如果没有 SIP 层，返回 false
 	return false
 }
 
@@ -42,10 +48,15 @@ func (s *sipHandler) Type() string {
 	return "sip"
 }
 
-func (s *sipHandler) Stats() HandlerStats {
+func (s *sipHandler) Stats() types.HandlerStats {
 	return s.stats
 }
 
-func (s *sipHandler) Handle(packet gopacket.Packet) ([]*v1.SniffData, error) {
-	return nil, nil
+func (s *sipHandler) Handle(packet gopacket.Packet) ([]*types.RawFrameData, error) {
+	data := &types.RawFrameData{
+		Protocol:  "SIP",
+		Content:   packet.Layer(layers.LayerTypeSIP).LayerContents(),
+		Timestamp: packet.Metadata().Timestamp.UnixNano() / 1e6,
+	}
+	return []*types.RawFrameData{data}, nil
 }
