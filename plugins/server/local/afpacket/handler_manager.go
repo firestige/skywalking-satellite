@@ -23,26 +23,27 @@ import (
 	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/handler"
 )
 
 // handlerManager implements HandlerManager interface
 type handlerManager struct {
-	handlers map[string]PacketHandler
+	handlers map[string]handler.PacketHandler
 	mu       sync.RWMutex
 }
 
 // NewHandlerManager creates a new handler manager
 func NewHandlerManager() HandlerManager {
 	return &handlerManager{
-		handlers: make(map[string]PacketHandler),
+		handlers: make(map[string]handler.PacketHandler),
 	}
 }
 
-func (h *handlerManager) Prepare() error {
+func (m *handlerManager) Prepare() error {
 	log.Logger.Info("preparing handler manager...")
 
 	// Initialize default handlers
-	if err := h.initializeDefaultHandlers(); err != nil {
+	if err := m.initializeDefaultHandlers(); err != nil {
 		return fmt.Errorf("failed to initialize default handlers: %w", err)
 	}
 
@@ -50,11 +51,11 @@ func (h *handlerManager) Prepare() error {
 	return nil
 }
 
-func (h *handlerManager) Start(ctx context.Context, wg *sync.WaitGroup) error {
+func (m *handlerManager) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	log.Logger.Info("starting handler manager...")
 
 	// Start all registered handlers
-	for name, handler := range h.handlers {
+	for name, handler := range m.handlers {
 		log.Logger.Infof("starting handler: %s", name)
 		// TODO: Start handler if needed
 		_ = handler
@@ -63,14 +64,14 @@ func (h *handlerManager) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	return nil
 }
 
-func (h *handlerManager) Close() error {
+func (m *handlerManager) Close() error {
 	log.Logger.Info("closing handler manager...")
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	// Close all handlers
-	for name, handler := range h.handlers {
+	for name, handler := range m.handlers {
 		log.Logger.Infof("closing handler: %s", name)
 		// TODO: Close handler if needed
 		_ = handler
@@ -79,64 +80,57 @@ func (h *handlerManager) Close() error {
 	return nil
 }
 
-func (h *handlerManager) RegisterHandler(handler PacketHandler) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+func (m *handlerManager) RegisterHandler(handler handler.PacketHandler) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	name := handler.Name()
-	if _, exists := h.handlers[name]; exists {
+	if _, exists := m.handlers[name]; exists {
 		return fmt.Errorf("handler %s already exists", name)
 	}
 
-	h.handlers[name] = handler
+	m.handlers[name] = handler
 	log.Logger.Infof("registered handler: %s", name)
 	return nil
 }
 
-func (h *handlerManager) UnregisterHandler(name string) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+func (m *handlerManager) UnregisterHandler(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	if _, exists := h.handlers[name]; !exists {
+	if _, exists := m.handlers[name]; !exists {
 		return fmt.Errorf("handler %s not found", name)
 	}
 
-	delete(h.handlers, name)
+	delete(m.handlers, name)
 	log.Logger.Infof("unregistered handler: %s", name)
 	return nil
 }
 
-func (h *handlerManager) GetHandlers() []PacketHandler {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+func (m *handlerManager) GetHandlers() []handler.PacketHandler {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
-	handlers := make([]PacketHandler, 0, len(h.handlers))
-	for _, handler := range h.handlers {
+	handlers := make([]handler.PacketHandler, 0, len(m.handlers))
+	for _, handler := range m.handlers {
 		handlers = append(handlers, handler)
 	}
 
 	return handlers
 }
 
-func (h *handlerManager) initializeDefaultHandlers() error {
-	// Register default handlers
-
-	// HTTP Handler
-	httpHandler := NewHTTPHandler()
-	if err := h.RegisterHandler(httpHandler); err != nil {
-		return fmt.Errorf("failed to register HTTP handler: %w", err)
+func (m *handlerManager) initializeDefaultHandlers() error {
+	// Define default handlers
+	handlers := []handler.PacketHandler{
+		handler.NewHTTPHandler(),
+		handler.NewESLHandler(),
 	}
 
-	// TCP Handler
-	tcpHandler := NewTCPHandler()
-	if err := h.RegisterHandler(tcpHandler); err != nil {
-		return fmt.Errorf("failed to register TCP handler: %w", err)
-	}
-
-	// UDP Handler
-	udpHandler := NewUDPHandler()
-	if err := h.RegisterHandler(udpHandler); err != nil {
-		return fmt.Errorf("failed to register UDP handler: %w", err)
+	// Register all handlers
+	for _, h := range handlers {
+		if err := m.RegisterHandler(h); err != nil {
+			return fmt.Errorf("failed to register %s handler: %w", h.Name(), err)
+		}
 	}
 
 	return nil

@@ -38,6 +38,10 @@ type packetCapture struct {
 	packetSource *gopacket.PacketSource
 	stats        CaptureStats
 	mu           sync.RWMutex
+
+	// 添加包分发通道
+	packetChan chan gopacket.Packet
+	closed     chan struct{} // 添加关闭信号
 }
 
 // NewPacketCapture creates a new packet capture instance
@@ -46,6 +50,8 @@ func NewPacketCapture(interfaceName string, bufferSize int, filter string) Packe
 		interfaceName: interfaceName,
 		bufferSize:    bufferSize,
 		filter:        filter,
+		packetChan:    make(chan gopacket.Packet, 100),
+		closed:        make(chan struct{}),
 	}
 }
 
@@ -88,15 +94,14 @@ func (p *packetCapture) Start(ctx context.Context, wg *sync.WaitGroup) error {
 func (p *packetCapture) Close() error {
 	log.Logger.Info("closing packet capture...")
 
+	// 发送关闭信号
+	close(p.closed)
+
 	if p.handle != nil {
 		p.handle.Close()
 	}
 
 	return nil
-}
-
-func (p *packetCapture) GetPacketSource() *gopacket.PacketSource {
-	return p.packetSource
 }
 
 func (p *packetCapture) GetStats() CaptureStats {
@@ -106,10 +111,50 @@ func (p *packetCapture) GetStats() CaptureStats {
 }
 
 func (p *packetCapture) captureLoop(ctx context.Context) {
-	// TODO: Implement actual packet capture loop
-	// This would read packets from the packet source and update stats
 	log.Logger.Info("packet capture loop started")
+	defer log.Logger.Info("packet capture loop stopped")
+	defer close(p.packetChan) // 确保在退出时关闭通道
 
-	<-ctx.Done()
-	log.Logger.Info("packet capture loop stopped")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.closed:
+			return
+		default:
+			packet, err := p.packetSource.NextPacket()
+			if err != nil {
+				log.Logger.Errorf("error reading packet: %v", err)
+				p.mu.Lock()
+				p.stats.ErrorCount++
+				p.mu.Unlock()
+				continue
+			}
+
+			// 更新统计信息
+			p.mu.Lock()
+			p.stats.PacketsReceived++
+			p.stats.BytesReceived += uint64(len(packet.Data()))
+			p.mu.Unlock()
+
+			// 非阻塞发送到处理通道
+			select {
+			case p.packetChan <- packet:
+			default:
+				// 如果通道满了，丢弃包并记录统计
+				p.mu.Lock()
+				p.stats.PacketsDropped++
+				p.mu.Unlock()
+				log.Logger.Warn("packet channel full, dropping packet")
+			case <-ctx.Done():
+				return
+			case <-p.closed:
+				return
+			}
+		}
+	}
+}
+
+func (p *packetCapture) GetPacketChannel() <-chan gopacket.Packet {
+	return p.packetChan
 }

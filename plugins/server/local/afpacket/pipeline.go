@@ -30,6 +30,7 @@ import (
 type dataPipeline struct {
 	// Multiple independent pipelines for different data types
 	pipelines map[string]*pipeline
+	handlers  map[string]DataProcessor
 	mu        sync.RWMutex
 
 	// Configuration
@@ -53,6 +54,7 @@ type pipeline struct {
 func NewDataPipeline() DataPipeline {
 	return &dataPipeline{
 		pipelines:         make(map[string]*pipeline),
+		handlers:          make(map[string]DataProcessor),
 		defaultBufferSize: 1000,
 		maxWorkers:        10,
 	}
@@ -156,6 +158,22 @@ func (d *dataPipeline) GetStats() PipelineStats {
 	return totalStats
 }
 
+func (d *dataPipeline) SetDataProcessor(name string, processor DataProcessor) error {
+	p := d.pipelines[name]
+	if p == nil {
+		return fmt.Errorf("pipeline %s not found", name)
+	}
+	d.handlers[name] = processor
+	log.Logger.Infof("data processor set for pipeline %s", name)
+	return nil
+}
+
+func (d *dataPipeline) ClearDataProcessor() error {
+	d.handlers = make(map[string]DataProcessor)
+	log.Logger.Info("cleared all data processors")
+	return nil
+}
+
 func (d *dataPipeline) initializePipelines() error {
 	// Create default pipeline
 	defaultPipeline := &pipeline{
@@ -219,15 +237,22 @@ func (d *dataPipeline) processData(p *pipeline, data []*v1.SniffData) error {
 
 	// Process each SniffData
 	for _, sniffData := range data {
-		// TODO: Send to registered receiver
-		// For now, just log
-		log.Logger.Debugf("processing sniff data: %s", sniffData.Name)
+		if handler, exists := d.handlers[p.name]; exists {
+			if err := handler(sniffData); err != nil {
+				log.Logger.Errorf("failed to process sniff data %s: %v", sniffData.Name, err)
+				p.mu.Lock()
+				p.stats.ErrorCount++
+				p.mu.Unlock()
+			} else {
+				log.Logger.Debugf("processing sniff data: %s", sniffData.Name)
+			}
+		}
 	}
 
 	// Update statistics
 	p.mu.Lock()
 	p.stats.ItemsProcessed += uint64(len(data))
-	p.stats.QueueDepth = len(p.dataChan)
+	p.stats.QueueDepth = uint64(len(p.dataChan))
 	p.mu.Unlock()
 
 	return nil

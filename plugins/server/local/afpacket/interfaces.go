@@ -23,91 +23,52 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/handler"
 	"github.com/google/gopacket"
 	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
 )
 
-// PacketCapture handles low-level packet capture using AF_PACKET v3
-type PacketCapture interface {
-	io.Closer
+// DataProcessor defines the function signature for processing SniffData
+type DataProcessor func(*v1.SniffData) error
 
-	// Prepare initializes the packet capture
+// DataPipeline defines the interface for data pipeline
+type DataPipeline interface {
 	Prepare() error
-
-	// Start begins packet capture
 	Start(ctx context.Context, wg *sync.WaitGroup) error
+	Close() error
+	Submit([]*v1.SniffData) error
+	GetStats() PipelineStats
 
-	// GetPacketSource returns the gopacket source for reading packets
-	GetPacketSource() *gopacket.PacketSource
+	// SetDataProcessor sets the data processor function
+	SetDataProcessor(name string, processor DataProcessor) error
+	ClearDataProcessor() error
+}
 
-	// GetStats returns capture statistics
+// PacketCapture defines the interface for packet capture
+type PacketCapture interface {
+	Prepare() error
+	Start(ctx context.Context, wg *sync.WaitGroup) error
+	Close() error
+	GetPacketChannel() <-chan gopacket.Packet
 	GetStats() CaptureStats
 }
 
-// EventLoop manages the main event processing loop
-type EventLoop interface {
-	io.Closer
-
-	// Prepare initializes the event loop
-	Prepare() error
-
-	// Start begins the event loop
-	Start(ctx context.Context, wg *sync.WaitGroup) error
-
-	// ProcessPacket processes a single packet through handlers
-	ProcessPacket(packet gopacket.Packet) error
-}
-
-// HandlerManager manages packet handlers
+// HandlerManager defines the interface for managing packet handlers
 type HandlerManager interface {
-	io.Closer
-
-	// Prepare initializes the handler manager
 	Prepare() error
-
-	// Start begins handler processing
 	Start(ctx context.Context, wg *sync.WaitGroup) error
-
-	// RegisterHandler registers a new packet handler
-	RegisterHandler(handler PacketHandler) error
-
-	// UnregisterHandler removes a packet handler
+	Close() error
+	RegisterHandler(handler.PacketHandler) error
 	UnregisterHandler(name string) error
-
-	// GetHandlers returns all registered handlers
-	GetHandlers() []PacketHandler
+	GetHandlers() []handler.PacketHandler
 }
 
-// PacketHandler defines the interface for packet processing
-type PacketHandler interface {
-	// Name returns the handler name
-	Name() string
-
-	// CanHandle determines if this handler can process the packet
-	CanHandle(packet gopacket.Packet) bool
-
-	// Handle processes the packet and returns SniffData
-	Handle(packet gopacket.Packet) ([]*v1.SniffData, error)
-
-	// GetStats returns handler statistics
-	GetStats() HandlerStats
-}
-
-// DataPipeline manages async data processing pipelines
-type DataPipeline interface {
-	io.Closer
-
-	// Prepare initializes the data pipeline
+// EventLoop defines the interface for event loop
+type EventLoop interface {
 	Prepare() error
-
-	// Start begins pipeline processing
 	Start(ctx context.Context, wg *sync.WaitGroup) error
-
-	// Submit submits data for processing
-	Submit(sniffData []*v1.SniffData) error
-
-	// GetStats returns pipeline statistics
-	GetStats() PipelineStats
+	Close() error
+	ProcessPacket(packet gopacket.Packet) error
 }
 
 // MonitoringManager handles monitoring and statistics
@@ -130,7 +91,7 @@ type MonitoringManager interface {
 	RecordProcess(handlerName string, processingTime time.Duration)
 }
 
-// Statistics structures
+// CaptureStats contains statistics for packet capture
 type CaptureStats struct {
 	PacketsReceived uint64
 	PacketsDropped  uint64
@@ -138,16 +99,26 @@ type CaptureStats struct {
 	ErrorCount      uint64
 }
 
-type HandlerStats struct {
-	PacketsProcessed uint64
-	PacketsDropped   uint64
-	ProcessingTime   time.Duration
-	ErrorCount       uint64
-}
-
+// PipelineStats contains statistics for data pipeline
 type PipelineStats struct {
 	ItemsProcessed uint64
 	ItemsDropped   uint64
-	QueueDepth     int
+	QueueDepth     uint64
 	ErrorCount     uint64
+}
+
+// ServerStats contains overall server statistics
+type ServerStats struct {
+	CaptureStats  CaptureStats
+	PipelineStats PipelineStats
+	HandlerStats  map[string]handler.HandlerStats
+}
+
+// Config contains configuration for AFPacket server
+type Config struct {
+	Interface          string `mapstructure:"interface"`
+	BufferSize         int    `mapstructure:"buffer_size"`
+	Filter             string `mapstructure:"filter"`
+	MaxWorkers         int    `mapstructure:"max_workers"`
+	PipelineBufferSize int    `mapstructure:"pipeline_buffer_size"`
 }

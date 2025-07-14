@@ -108,36 +108,6 @@ func TestComponentCreation(t *testing.T) {
 	}
 }
 
-func TestHandlerCreation(t *testing.T) {
-	// Test that handlers can be created
-	httpHandler := NewHTTPHandler()
-	if httpHandler == nil {
-		t.Error("HTTPHandler creation failed")
-	}
-
-	if httpHandler.Name() != "http-handler" {
-		t.Errorf("expected handler name 'http-handler', got %s", httpHandler.Name())
-	}
-
-	tcpHandler := NewTCPHandler()
-	if tcpHandler == nil {
-		t.Error("TCPHandler creation failed")
-	}
-
-	if tcpHandler.Name() != "tcp-handler" {
-		t.Errorf("expected handler name 'tcp-handler', got %s", tcpHandler.Name())
-	}
-
-	udpHandler := NewUDPHandler()
-	if udpHandler == nil {
-		t.Error("UDPHandler creation failed")
-	}
-
-	if udpHandler.Name() != "udp-handler" {
-		t.Errorf("expected handler name 'udp-handler', got %s", udpHandler.Name())
-	}
-}
-
 func TestPluginRegistration(t *testing.T) {
 	// Test that the plugin is registered
 	config := plugin.Config{

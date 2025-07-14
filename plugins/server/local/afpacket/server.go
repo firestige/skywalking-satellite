@@ -25,6 +25,7 @@ import (
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
+	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
 )
 
 const (
@@ -161,6 +162,10 @@ func (s *Server) Close() error {
 
 func (s *Server) GetServer() interface{} {
 	return s
+}
+
+func (s *Server) RegisterHandler(protocol string, handler func(*v1.SniffData) error) error {
+	return s.pipeline.SetDataProcessor(protocol, handler)
 }
 
 // Initialize all components

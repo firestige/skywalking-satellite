@@ -48,8 +48,21 @@ func NewEventLoop(capture PacketCapture, handlerMgr HandlerManager, pipeline Dat
 func (e *eventLoop) Prepare() error {
 	log.Logger.Info("preparing event loop...")
 
-	// Event loop preparation logic
-	// Connect components together
+	// 验证必要的组件依赖
+	if e.capture == nil {
+		return fmt.Errorf("packet capture is nil")
+	}
+	if e.handlerMgr == nil {
+		return fmt.Errorf("handler manager is nil")
+	}
+	if e.pipeline == nil {
+		return fmt.Errorf("data pipeline is nil")
+	}
+
+	// 验证组件是否实现了必要的接口方法
+	if _, ok := e.capture.(interface{ GetPacketChannel() <-chan gopacket.Packet }); !ok {
+		return fmt.Errorf("packet capture does not implement GetPacketChannel method")
+	}
 
 	log.Logger.Info("event loop prepared successfully")
 	return nil
@@ -112,19 +125,16 @@ func (e *eventLoop) run(ctx context.Context) {
 	log.Logger.Info("event loop started")
 	defer log.Logger.Info("event loop stopped")
 
-	packetSource := e.capture.GetPacketSource()
-	if packetSource == nil {
-		log.Logger.Error("packet source is nil")
-		return
-	}
+	// 使用接口方法获取通道
+	packetChan := e.capture.GetPacketChannel()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case packet, ok := <-packetSource.Packets():
+		case packet, ok := <-packetChan:
 			if !ok {
-				log.Logger.Info("packet source closed")
+				log.Logger.Info("packet channel closed")
 				return
 			}
 
