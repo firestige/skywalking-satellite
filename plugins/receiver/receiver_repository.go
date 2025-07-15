@@ -22,6 +22,7 @@ import (
 
 	"github.com/apache/skywalking-satellite/internal/pkg/plugin"
 	"github.com/apache/skywalking-satellite/plugins/receiver/api"
+	"github.com/apache/skywalking-satellite/plugins/receiver/esl"
 	"github.com/apache/skywalking-satellite/plugins/receiver/grpc/envoyalsv2"
 	"github.com/apache/skywalking-satellite/plugins/receiver/grpc/envoyalsv3"
 	"github.com/apache/skywalking-satellite/plugins/receiver/grpc/envoymetricsv2"
@@ -41,6 +42,7 @@ import (
 	grpcnativetracing "github.com/apache/skywalking-satellite/plugins/receiver/grpc/nativetracing"
 	"github.com/apache/skywalking-satellite/plugins/receiver/grpc/otlpmetricsv1"
 	httpnavtivelog "github.com/apache/skywalking-satellite/plugins/receiver/http/nativcelog"
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip"
 )
 
 // RegisterReceiverPlugins register the used receiver plugins.
@@ -67,6 +69,8 @@ func RegisterReceiverPlugins() {
 		new(otlpmetricsv1.Receiver),
 		new(grpcnativeebpfaccesslog.Receiver),
 		new(grpcasyncprofiler.Receiver),
+		new(sip.Receiver),
+		new(esl.Receiver),
 	}
 	for _, receiver := range receivers {
 		plugin.RegisterPlugin(receiver)
