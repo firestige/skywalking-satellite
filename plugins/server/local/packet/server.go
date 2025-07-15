@@ -3,10 +3,26 @@ package packet
 import (
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/plugins/server/api"
+	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
+)
+
+const (
+	Name        = "packet-server"
+	ShowName    = "Packet Server"
+	Description = "A server plugin for packet capture and processing"
 )
 
 type serverAdapter struct {
 	config.CommonFields
+
+	Interface     string `mapstructure:"interface"`      // Network interface to capture on
+	BufferSize    int    `mapstructure:"buffer_size"`    // Ring buffer size
+	Filter        string `mapstructure:"filter"`         // BPF filter expression
+	StatsInterval int    `mapstructure:"stats_interval"` // Statistics reporting interval
+	DropThreshold int    `mapstructure:"drop_threshold"` // Drop count threshold for reporting
+
+	capture          types.DataSource
+	channelProcessor types.StreamProcessor
 }
 
 func NewServer() api.Server {

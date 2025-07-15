@@ -3,6 +3,8 @@ package types
 import (
 	"context"
 	"sync"
+
+	"github.com/google/gopacket"
 )
 
 type Lifecycle interface {
@@ -13,7 +15,7 @@ type Lifecycle interface {
 
 type DataSource interface {
 	Lifecycle
-	Fetch(ctx context.Context) ([]byte, error)
+	Fetch(ctx context.Context) (gopacket.Packet, error)
 }
 
 type RawFrameData struct {
