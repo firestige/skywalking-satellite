@@ -7,6 +7,7 @@ toolchain go1.23.6
 require (
 	github.com/Shopify/sarama v1.27.2
 	github.com/enriquebris/goconcurrentqueue v0.7.0
+	github.com/ghettovoice/gosip v0.0.0-20250630130757-122c8ec8891f
 	github.com/google/go-cmp v0.7.0
 	github.com/grandecola/mmap v0.7.0
 	github.com/hashicorp/go-multierror v1.1.1
@@ -28,7 +29,15 @@ require (
 	skywalking.apache.org/repo/goapi v0.0.0-20241106011455-ef3dbfac3128
 )
 
-require github.com/pmezard/go-difflib v1.0.0 // indirect
+require (
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.17 // indirect
+	github.com/mgutz/ansi v0.0.0-20170206155736-9520e82c474b // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/satori/go.uuid v1.2.1-0.20181028125025-b2ce2384e17b // indirect
+	github.com/tevino/abool v0.0.0-20170917061928-9b9efcf221b5 // indirect
+	github.com/x-cray/logrus-prefixed-formatter v0.5.2 // indirect
+)
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
