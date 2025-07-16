@@ -74,7 +74,7 @@ func TestFilterBuilder_IPv4WithOptions(t *testing.T) {
 		},
 		{
 			name:     "IPv4 with WithLabel chain",
-			options:  []interface{}{WithLabel("ipv4_check").orDrop()},
+			options:  []interface{}{WithLabel("ipv4_check").OrDrop()},
 			wantErr:  false,
 			checkPos: true,
 		},
@@ -185,7 +185,7 @@ func TestFilterBuilder_TCP(t *testing.T) {
 
 func TestFilterBuilder_UDP(t *testing.T) {
 	builder := NewFilterBuilder()
-	result := builder.UDP(WithLabel("udp_check").orDrop())
+	result := builder.UDP(WithLabel("udp_check").OrDrop())
 
 	if result != builder {
 		t.Error("UDP() should return the same builder instance")
@@ -480,7 +480,7 @@ func TestFilterBuilder_ResolveJumps_UndefinedLabel(t *testing.T) {
 }
 
 func TestChainConfig(t *testing.T) {
-	chain := WithLabel("test").jumpToIfMatch("match_label").orNotMatch("nomatch_label")
+	chain := WithLabel("test").JumpToIfMatch("match_label").OrNotMatch("nomatch_label")
 
 	if chain.labelName != "test" {
 		t.Errorf("chainConfig labelName = %s, want test", chain.labelName)
@@ -496,7 +496,7 @@ func TestChainConfig(t *testing.T) {
 }
 
 func TestChainConfig_OrDrop(t *testing.T) {
-	chain := WithLabel("test").orDrop()
+	chain := WithLabel("test").OrDrop()
 
 	if chain.jumpIfNoMatch != LabelDrop {
 		t.Errorf("chainConfig jumpIfNoMatch = %s, want %s", chain.jumpIfNoMatch, LabelDrop)
@@ -504,7 +504,7 @@ func TestChainConfig_OrDrop(t *testing.T) {
 }
 
 func TestChainConfig_OrAccept(t *testing.T) {
-	chain := WithLabel("test").orAccept()
+	chain := WithLabel("test").OrAccept()
 
 	if chain.jumpIfNoMatch != LabelAccept {
 		t.Errorf("chainConfig jumpIfNoMatch = %s, want %s", chain.jumpIfNoMatch, LabelAccept)

@@ -112,22 +112,22 @@ type chainConfig struct {
 }
 
 // Chain configuration methods for fluent API
-func (c *chainConfig) jumpToIfMatch(target string) *chainConfig {
+func (c *chainConfig) JumpToIfMatch(target string) *chainConfig {
 	c.jumpIfMatch = target
 	return c
 }
 
-func (c *chainConfig) orNotMatch(target string) *chainConfig {
+func (c *chainConfig) OrNotMatch(target string) *chainConfig {
 	c.jumpIfNoMatch = target
 	return c
 }
 
-func (c *chainConfig) orDrop() *chainConfig {
+func (c *chainConfig) OrDrop() *chainConfig {
 	c.jumpIfNoMatch = LabelDrop
 	return c
 }
 
-func (c *chainConfig) orAccept() *chainConfig {
+func (c *chainConfig) OrAccept() *chainConfig {
 	c.jumpIfNoMatch = LabelAccept
 	return c
 }
@@ -601,7 +601,7 @@ func (f *prebuildFilter) SIP(port uint32) ([]bpf.RawInstruction, error) {
 		PortOrAccept(port, "check_udp").
 
 		// UDP check using chain configuration
-		UDP(WithLabel("check_udp").orDrop()).
+		UDP(WithLabel("check_udp").OrDrop()).
 
 		// UDP port check, accept if match, drop if no match
 		PortOrDrop(port).

@@ -43,7 +43,7 @@ GO_BUILD_LDFLAGS = -X main.version=$(VERSION) -X google.golang.org/protobuf/refl
 GO_TEST_LDFLAGS = -X google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn
 GQL_GEN = $(GO_PATH)/bin/gqlgen
 
-PLATFORMS := linux darwin windows
+PLATFORMS := linux
 os = $(word 1, $@)
 ARCH = amd64
 
@@ -78,7 +78,7 @@ clean: tools
 	-rm -rf coverage.txt
 
 .PHONY: build
-build: clean deps linux darwin windows
+build: clean deps linux
 
 .PHONY: check
 check: clean

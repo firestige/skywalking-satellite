@@ -2,6 +2,7 @@ package packet
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
@@ -20,30 +21,92 @@ type Pipeline struct {
 }
 
 func (p *Pipeline) Prepare() error {
-	p.source.Prepare()
+	// 准备数据源
+	if err := p.source.Prepare(); err != nil {
+		return err
+	}
+
+	// 准备过滤链
+	if err := p.filterChain.Prepare(); err != nil {
+		return err
+	}
+
+	// 准备分发器
+	if err := p.dispatcher.Prepare(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func (p *Pipeline) Start(ctx context.Context, wg *sync.WaitGroup) error {
+	// 设置上下文和等待组
+	p.ctx, p.cancel = context.WithCancel(ctx)
+	p.wg = wg
+
+	// 异步启动流水线处理
+	p.wg.Add(1)
+	go p.run()
+
+	return nil
+}
+
+func (p *Pipeline) run() {
+	defer p.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Logger.Error("Pipeline panic recovered:", r)
+		}
+	}()
+
+	log.Logger.Info("Pipeline started")
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-p.ctx.Done():
 			log.Logger.Info("Pipeline context done, stopping...")
-			return nil
+			return
 		default:
-			frame, err := p.source.Fetch(ctx)
+			frame, err := p.source.Fetch(p.ctx)
 			if err != nil {
 				log.Logger.Error("Error fetching frame:", err)
 				continue
 			}
 
+			if frame == types.EmptyRawFrameData {
+				continue
+			}
+
+			// 通过过滤链处理frame
 			p.filterChain.Filter(frame)
 		}
 	}
 }
 
 func (p *Pipeline) Close() error {
+	log.Logger.Info("Closing pipeline...")
+
+	// 取消上下文
+	if p.cancel != nil {
+		p.cancel()
+	}
+
+	// 关闭数据源
+	if err := p.source.Close(); err != nil {
+		log.Logger.Error("Error closing source:", err)
+	}
+
+	// 关闭过滤链
+	if err := p.filterChain.Close(); err != nil {
+		log.Logger.Error("Error closing filter chain:", err)
+	}
+
+	// 关闭分发器
+	if err := p.dispatcher.Close(); err != nil {
+		log.Logger.Error("Error closing dispatcher:", err)
+	}
+
+	log.Logger.Info("Pipeline closed")
 	return nil
 }
 
@@ -68,6 +131,19 @@ func (b *PipelineBuilder) WithFilters(filters []types.FrameFilter) *PipelineBuil
 }
 
 func (b *PipelineBuilder) Build() (*Pipeline, error) {
+	if b.source == nil {
+		return nil, fmt.Errorf("data source is required")
+	}
+
+	if b.filterChain == nil {
+		// 如果没有过滤器，创建一个空的过滤链
+		b.filterChain = NewFrameFilterChain(b.dispatcher, []types.FrameFilter{})
+	}
+
+	if b.dispatcher == nil {
+		return nil, fmt.Errorf("frame handler is required")
+	}
+
 	return &Pipeline{
 		source:      b.source,
 		filterChain: b.filterChain,

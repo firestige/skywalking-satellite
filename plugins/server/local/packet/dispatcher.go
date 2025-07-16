@@ -1,7 +1,9 @@
 package packet
 
 import (
+	"context"
 	"fmt"
+	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
@@ -9,10 +11,10 @@ import (
 
 type frameHandlerAdapter struct {
 	name    string // Handler name for logging
-	handler func(frame types.RawFrameData) error
+	handler func(frame *types.RawFrameData) error
 }
 
-func newFrameHandlerAdapter(name string, handler func(frame types.RawFrameData) error) *frameHandlerAdapter {
+func newFrameHandlerAdapter(name string, handler func(frame *types.RawFrameData) error) *frameHandlerAdapter {
 	if handler == nil {
 		log.Logger.Error("Handler function cannot be nil")
 		return nil
@@ -20,7 +22,7 @@ func newFrameHandlerAdapter(name string, handler func(frame types.RawFrameData) 
 	return &frameHandlerAdapter{name: name, handler: handler}
 }
 
-func (a *frameHandlerAdapter) Handle(frame types.RawFrameData) error {
+func (a *frameHandlerAdapter) Handle(frame *types.RawFrameData) error {
 	return a.handler(frame)
 }
 
@@ -28,11 +30,25 @@ func (a *frameHandlerAdapter) Name() string {
 	return a.name
 }
 
+func (a *frameHandlerAdapter) Prepare() error {
+	return nil // No preparation needed for dispatcher
+}
+
+func (a *frameHandlerAdapter) Start(ctx context.Context, wg *sync.WaitGroup) error {
+	// No specific start logic for dispatcher
+	return nil
+}
+
+func (a *frameHandlerAdapter) Close() error {
+	// No specific close logic for dispatcher
+	return nil
+}
+
 type dispatcher struct {
 	handlerMapping map[string]types.FrameHandler
 }
 
-func (d *dispatcher) Handle(frame types.RawFrameData) error {
+func (d *dispatcher) Handle(frame *types.RawFrameData) error {
 	protocol := frame.Connection.Protocol
 	if handler, exists := d.handlerMapping[protocol]; exists {
 		handler.Handle(frame)
@@ -40,6 +56,20 @@ func (d *dispatcher) Handle(frame types.RawFrameData) error {
 	} else {
 		return fmt.Errorf("no handler found for protocol: %s", protocol)
 	}
+}
+
+func (d *dispatcher) Prepare() error {
+	return nil // No preparation needed for dispatcher
+}
+
+func (d *dispatcher) Start(ctx context.Context, wg *sync.WaitGroup) error {
+	// No specific start logic for dispatcher
+	return nil
+}
+
+func (d *dispatcher) Close() error {
+	// No specific close logic for dispatcher
+	return nil
 }
 
 type DispatcherBuilder struct {
@@ -52,7 +82,7 @@ func NewDispatcherBuilder() *DispatcherBuilder {
 	}
 }
 
-func (b *DispatcherBuilder) WithHandler(protocol string, name string, handler func(frame types.RawFrameData) error) *DispatcherBuilder {
+func (b *DispatcherBuilder) WithHandler(protocol string, name string, handler func(frame *types.RawFrameData) error) *DispatcherBuilder {
 	if protocol == "" || handler == nil {
 		log.Logger.Error("Protocol and handler must be provided")
 		return b

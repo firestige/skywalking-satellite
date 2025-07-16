@@ -2,7 +2,9 @@ package packet
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
@@ -14,163 +16,562 @@ import (
 	"golang.org/x/net/bpf"
 )
 
+// CaptureConfig 配置结构
+type CaptureConfig struct {
+	Interface      string               // 网络接口名称
+	BPFFilter      []bpf.RawInstruction // BPF过滤规则
+	SnapLen        int                  // 抓包长度
+	BufferSize     int                  // 缓冲区大小
+	RingSize       int                  // 环形缓冲区大小
+	WorkerCount    int                  // 工作协程数量
+	MTU            int                  // 最大传输单元
+	BlockSize      int                  // AF_PACKET块大小
+	NumBlocks      int                  // AF_PACKET块数量
+	FlushTimeout   time.Duration        // 超时时间
+	LocalAddresses []string             // 本机地址列表
+}
+
+// DefaultCaptureConfig 默认配置
+func DefaultCaptureConfig() *CaptureConfig {
+	return &CaptureConfig{
+		Interface:      "eth0",
+		SnapLen:        65535,
+		BufferSize:     1024 * 1024 * 2, // 2MB
+		RingSize:       1024,
+		WorkerCount:    4,
+		MTU:            1500,
+		BlockSize:      1024 * 1024,
+		NumBlocks:      128,
+		FlushTimeout:   pcap.BlockForever,
+		LocalAddresses: GetLocalAddresses(),
+	}
+}
+
+// networkCapture 网络抓包实现
 type networkCapture struct {
-	handle                 *afpacket.TPacket // Handle for the AF_PACKET interface
-	ringBuffer             *utils.RingBuffer
-	tcpAssembler           *TCPAssembler
-	lengthFieldBaseDecoder *LengthFieldBaseDecoder
-
-	packetPool sync.Pool
-	bufferPool sync.Pool
-
 	config *CaptureConfig
 
+	// AF_PACKET句柄
+	handle *afpacket.TPacket
+
+	// 数据处理组件
+	ringBuffer   *utils.RingBuffer
+	tcpAssembler *TCPAssembler
+
+	// 工作协程管理
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	nic        string
-	bpfFilter  string
-	bufferSize int
+	// 数据通道
+	packetChan chan *types.PacketInfo
+	frameChan  chan *types.RawFrameData
 
-	packetSource *gopacket.PacketSource
-	closed       chan struct{} // Channel to signal closure
+	// 对象池
+	packetPool sync.Pool
+	bufferPool sync.Pool
+
+	// 状态
+	started bool
+	closed  bool
+	mu      sync.RWMutex
 }
 
-type CaptureConfig struct {
-	Interface   string
-	BPFFilter   []bpf.RawInstruction
-	SnapLen     int
-	BufferSize  int
-	RingSize    int
-	WorkerCount int
-	MTU         int
+// newNetworkCapture 创建网络抓包实例
+func newNetworkCapture(config *CaptureConfig) *networkCapture {
+	nc := &networkCapture{
+		config:     config,
+		ringBuffer: utils.NewRingBuffer(config.RingSize),
+		packetChan: make(chan *types.PacketInfo, config.RingSize),
+		frameChan:  make(chan *types.RawFrameData, config.RingSize),
+	}
+
+	// 初始化TCP重整器
+	nc.tcpAssembler = NewTCPAssembler(config.WorkerCount, config.LocalAddresses)
+
+	// 初始化对象池
+	nc.initPools()
+
+	return nc
 }
 
-func newNetworkCapture(config *CaptureConfig, ctx context.Context) (types.DataSource, error) {
+// initPools 初始化对象池
+func (nc *networkCapture) initPools() {
+	nc.packetPool = sync.Pool{
+		New: func() interface{} {
+			return &types.PacketInfo{
+				Payload: make([]byte, 0, nc.config.MTU),
+			}
+		},
+	}
+
+	nc.bufferPool = sync.Pool{
+		New: func() interface{} {
+			return make([]byte, 0, nc.config.MTU)
+		},
+	}
+}
+
+// Prepare 准备抓包环境
+func (nc *networkCapture) Prepare() error {
+	nc.mu.Lock()
+	defer nc.mu.Unlock()
+
+	if nc.started {
+		return fmt.Errorf("capture already started")
+	}
+
+	log.Logger.Infof("Preparing network capture on interface: %s", nc.config.Interface)
+
+	// 创建AF_PACKET句柄
+	// OptFrameSize: 设置每个帧的最大大小，相当于传统抓包中的snap length，控制每个数据包的最大捕获长度
+	// OptBlockSize: 设置环形缓冲区中每个块的大小，影响内存使用和性能
+	// OptNumBlocks: 设置环形缓冲区中块的数量，总缓冲区大小 = BlockSize × NumBlocks
 	handle, err := afpacket.NewTPacket(
-		afpacket.OptInterface(config.Interface),
-		afpacket.OptSnapLen(config.SnapLen),
-		afpacket.OptNumBlocks(128),
-		afpacket.OptBlockSize(1204*1024),
-		afpacket.OptPollTimeout(pcap.BlockForever),
+		afpacket.OptInterface(nc.config.Interface),
+		afpacket.OptFrameSize(nc.config.SnapLen), // 使用OptFrameSize代替OptSnapLen
+		afpacket.OptNumBlocks(nc.config.NumBlocks),
+		afpacket.OptBlockSize(nc.config.BlockSize),
+		afpacket.OptPollTimeout(nc.config.FlushTimeout),
 		afpacket.TPacketVersion3,
 	)
 	if err != nil {
 		log.Logger.Errorf("Failed to create AF_PACKET handle: %v", err)
-		return nil, err
+		return fmt.Errorf("failed to create AF_PACKET handle: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	nc := &networkCapture{
-		handle:                 handle,
-		ringBuffer:             utils.NewRingBuffer(config.RingSize),
-		tcpAssembler:           NewTCPAssembler(),
-		lengthFieldBaseDecoder: &LengthFieldBaseDecoder{},
-		config:                 config,
-		ctx:                    ctx,
-		cancel:                 cancel,
+	// 设置BPF过滤器
+	if len(nc.config.BPFFilter) > 0 {
+		if err := handle.SetBPF(nc.config.BPFFilter); err != nil {
+			log.Logger.Errorf("Failed to set BPF filter: %v", err)
+			handle.Close()
+			return fmt.Errorf("failed to set BPF filter: %w", err)
+		}
 	}
 
-	nc.initPools()
-
-	return nc, nil
-}
-
-func (n *networkCapture) initPools() {
-	n.packetPool = sync.Pool{
-		New: func() interface{} {
-			return &utils.PacketInfo{}
-		},
-	}
-
-	n.bufferPool = sync.Pool{
-		New: func() interface{} {
-			return make([]byte, 0, n.config.MTU)
-		},
-	}
-}
-
-func (n *networkCapture) Fetch(ctx context.Context) (types.RawFrameData, error) {
-	log.Logger.Info("Fetching packet from network interface")
-	defer log.Logger.Info("Fetch stopped")
-	return nil, nil
-}
-
-func (n *networkCapture) Prepare() error {
-	log.Logger.Infof("Preparing network capture on interface: %s", n.nic)
-	// Open the network interface for packet capture
-	handle, err := afpacket.NewTPacket(
-		afpacket.OptInterface(n.nic),
-		afpacket.OptBlockSize(n.bufferSize),
-		afpacket.TPacketVersion3,
-	)
-	if err != nil {
-		log.Logger.Errorf("Failed to open AF_PACKET handle: %v", err)
-		return err
-	}
-
-	bpfFilter, err := utils.PrebuildFilter.SIP(5060)
-	if err != nil {
-		log.Logger.Errorf("Failed to build BPF filter: %v", err)
-		handle.Close()
-		return err
-	}
-
-	handle.SetBPF(bpfFilter)
-
-	n.handle = handle
-	n.packetSource = gopacket.NewPacketSource(handle, layers.LinkTypeEthernet)
+	nc.handle = handle
+	log.Logger.Info("Network capture prepared successfully")
 	return nil
 }
 
-func (n *networkCapture) Start(ctx context.Context, wg *sync.WaitGroup) error {
-	// Implement the logic to start capturing packets
-	// This could involve starting a goroutine that listens on the network interface
-	// and processes incoming packets
+// Start 启动抓包
+func (nc *networkCapture) Start(ctx context.Context, wg *sync.WaitGroup) error {
+	nc.mu.Lock()
+	defer nc.mu.Unlock()
+
+	if nc.started {
+		return fmt.Errorf("capture already started")
+	}
+
+	if nc.handle == nil {
+		return fmt.Errorf("capture not prepared")
+	}
+
+	nc.ctx, nc.cancel = context.WithCancel(ctx)
+	nc.started = true
+
+	log.Logger.Info("Starting network capture...")
+
+	// 启动TCP重整器
+	nc.tcpAssembler.Start(nc.ctx)
+
+	// 启动工作协程
+	for i := 0; i < nc.config.WorkerCount; i++ {
+		nc.wg.Add(1)
+		go nc.packetWorker()
+	}
+
+	// 启动帧处理协程
+	nc.wg.Add(1)
+	go nc.frameWorker()
+
+	// 启动主抓包协程
+	nc.wg.Add(1)
+	go nc.captureLoop()
+
+	// 等待启动完成
+	if wg != nil {
+		wg.Done()
+	}
+
+	log.Logger.Info("Network capture started successfully")
 	return nil
 }
 
-func (n *networkCapture) Close() error {
-	log.Logger.Infof("Closing network capture on interface: %s", n.nic)
-	close(n.closed)
-	if n.handle != nil {
-		n.handle.Close()
-		n.handle = nil
-		n.packetSource = nil
+// captureLoop 主抓包循环
+func (nc *networkCapture) captureLoop() {
+	defer nc.wg.Done()
+
+	packetSource := gopacket.NewPacketSource(nc.handle, layers.LinkTypeEthernet)
+	packetSource.DecodeOptions.Lazy = true
+	packetSource.DecodeOptions.NoCopy = false
+
+	for {
+		select {
+		case <-nc.ctx.Done():
+			log.Logger.Info("Capture loop stopping...")
+			return
+		case packet, ok := <-packetSource.Packets():
+			if !ok {
+				log.Logger.Info("Packet source closed")
+				return
+			}
+
+			if packet == nil {
+				continue
+			}
+
+			// 从对象池获取PacketInfo
+			packetInfo := nc.packetPool.Get().(*types.PacketInfo)
+			packetInfo.Timestamp = packet.Metadata().Timestamp
+			packetInfo.Packet = packet
+
+			// 解析并缓存各层信息
+			nc.parsePacketLayers(packetInfo)
+
+			// 发送到处理队列
+			select {
+			case nc.packetChan <- packetInfo:
+			case <-nc.ctx.Done():
+				nc.packetPool.Put(packetInfo)
+				return
+			default:
+				// 队列满，丢弃包
+				nc.packetPool.Put(packetInfo)
+			}
+		}
 	}
+}
+
+// parsePacketLayers 解析数据包各层信息
+func (nc *networkCapture) parsePacketLayers(packetInfo *types.PacketInfo) {
+	packet := packetInfo.Packet
+
+	// 解析以太网层
+	if ethLayer := packet.Layer(layers.LayerTypeEthernet); ethLayer != nil {
+		if eth, ok := ethLayer.(*layers.Ethernet); ok {
+			packetInfo.EthLayer = eth
+		}
+	}
+
+	// 解析IPv4层
+	if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
+		if ip, ok := ipLayer.(*layers.IPv4); ok {
+			packetInfo.IPLayer = ip
+		}
+	}
+
+	// 解析TCP层
+	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+		if tcp, ok := tcpLayer.(*layers.TCP); ok {
+			packetInfo.TCPLayer = tcp
+			// 获取TCP载荷
+			payload := tcp.Payload
+			if len(payload) > 0 {
+				packetInfo.Payload = packetInfo.Payload[:len(payload)]
+				copy(packetInfo.Payload, payload)
+			}
+		}
+	}
+
+	// 解析UDP层（如果需要）
+	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+		if udp, ok := udpLayer.(*layers.UDP); ok {
+			// 获取UDP载荷
+			payload := udp.Payload
+			if len(payload) > 0 {
+				packetInfo.Payload = packetInfo.Payload[:len(payload)]
+				copy(packetInfo.Payload, payload)
+			}
+		}
+	}
+}
+
+// packetWorker 包处理工作协程
+func (nc *networkCapture) packetWorker() {
+	defer nc.wg.Done()
+
+	for {
+		select {
+		case <-nc.ctx.Done():
+			return
+		case packetInfo, ok := <-nc.packetChan:
+			if !ok {
+				return
+			}
+
+			nc.processPacket(packetInfo)
+
+			// 归还到对象池
+			nc.resetPacketInfo(packetInfo)
+			nc.packetPool.Put(packetInfo)
+		}
+	}
+}
+
+// resetPacketInfo 重置PacketInfo到初始状态
+func (nc *networkCapture) resetPacketInfo(packetInfo *types.PacketInfo) {
+	packetInfo.Packet = nil
+	packetInfo.EthLayer = nil
+	packetInfo.IPLayer = nil
+	packetInfo.TCPLayer = nil
+	packetInfo.Payload = packetInfo.Payload[:0]
+}
+
+// processPacket 处理单个数据包
+func (nc *networkCapture) processPacket(packetInfo *types.PacketInfo) {
+	// 检查是否有IPv4层
+	if packetInfo.IPLayer == nil {
+		return
+	}
+
+	ip := packetInfo.IPLayer
+
+	switch ip.Protocol {
+	case layers.IPProtocolTCP:
+		nc.processTCPPacket(packetInfo)
+	case layers.IPProtocolUDP:
+		nc.processUDPPacket(packetInfo)
+	}
+}
+
+// processTCPPacket 处理TCP数据包
+func (nc *networkCapture) processTCPPacket(packetInfo *types.PacketInfo) {
+	if packetInfo.TCPLayer == nil {
+		return
+	}
+
+	// 发送到TCP重整器
+	nc.tcpAssembler.ProcessPacket(packetInfo)
+}
+
+// processUDPPacket 处理UDP数据包
+func (nc *networkCapture) processUDPPacket(packetInfo *types.PacketInfo) {
+	packet := packetInfo.Packet
+	ip := packetInfo.IPLayer
+
+	udpLayer := packet.Layer(layers.LayerTypeUDP)
+	if udpLayer == nil {
+		return
+	}
+
+	udp, ok := udpLayer.(*layers.UDP)
+	if !ok {
+		return
+	}
+
+	// 获取UDP载荷
+	payload := udp.Payload
+	if len(payload) == 0 {
+		return
+	}
+
+	// 判断数据方向
+	direction := nc.determineDirection(ip.SrcIP.String(), ip.DstIP.String())
+
+	// 创建连接信息
+	connection := types.Connection{
+		SrcHost:  ip.SrcIP.String(),
+		SrcPort:  int(udp.SrcPort),
+		DestHost: ip.DstIP.String(),
+		DstPort:  int(udp.DstPort),
+		Protocol: types.UDP,
+	}
+
+	// 创建RawFrameData
+	frameData := types.RawFrameData{
+		Data: payload,
+		Meta: map[string]string{
+			"protocol": types.UDP,
+			"length":   fmt.Sprintf("%d", len(payload)),
+		},
+		Connection: connection,
+		Timestamp:  packetInfo.Timestamp.UnixNano(),
+		Direction:  direction,
+	}
+
+	// 发送到输出通道
+	select {
+	case nc.frameChan <- &frameData:
+	case <-nc.ctx.Done():
+		return
+	default:
+		// 通道满，丢弃帧
+	}
+}
+
+// frameWorker 帧处理工作协程
+func (nc *networkCapture) frameWorker() {
+	defer nc.wg.Done()
+
+	// 获取TCP重整器的输出通道
+	tcpFrameChan := nc.tcpAssembler.GetFrameChannel()
+
+	for {
+		select {
+		case <-nc.ctx.Done():
+			return
+		case frame := <-tcpFrameChan:
+			// 转发TCP帧
+			select {
+			case nc.frameChan <- frame:
+			case <-nc.ctx.Done():
+				return
+			default:
+				// 通道满，丢弃帧
+			}
+		}
+	}
+}
+
+// determineDirection 判断数据方向
+func (nc *networkCapture) determineDirection(srcIP, dstIP string) string {
+	for _, localAddr := range nc.config.LocalAddresses {
+		if srcIP == localAddr {
+			return "outbound"
+		}
+		if dstIP == localAddr {
+			return "inbound"
+		}
+	}
+	return "inbound" // 默认为入站
+}
+
+// Fetch 获取处理后的帧数据
+func (nc *networkCapture) Fetch(ctx context.Context) (*types.RawFrameData, error) {
+	select {
+	case <-ctx.Done():
+		return types.EmptyRawFrameData, ctx.Err()
+	case frame, ok := <-nc.frameChan:
+		if !ok {
+			return types.EmptyRawFrameData, fmt.Errorf("frame channel closed")
+		}
+		return frame, nil
+	}
+}
+
+// Close 关闭抓包
+func (nc *networkCapture) Close() error {
+	nc.mu.Lock()
+	defer nc.mu.Unlock()
+
+	if nc.closed {
+		return nil
+	}
+
+	log.Logger.Info("Closing network capture...")
+
+	// 取消上下文
+	if nc.cancel != nil {
+		nc.cancel()
+	}
+
+	// 等待所有协程结束
+	nc.wg.Wait()
+
+	// 停止TCP重整器
+	if nc.tcpAssembler != nil {
+		nc.tcpAssembler.Stop()
+	}
+
+	// 关闭AF_PACKET句柄
+	if nc.handle != nil {
+		nc.handle.Close()
+		nc.handle = nil
+	}
+
+	// 关闭通道
+	close(nc.packetChan)
+	close(nc.frameChan)
+
+	nc.closed = true
+	nc.started = false
+
 	log.Logger.Info("Network capture closed successfully")
 	return nil
 }
 
+// NetworkCaptureBuilder 构建器
 type NetworkCaptureBuilder struct {
 	config *CaptureConfig
 }
 
+// NewNetworkCaptureBuilder 创建构建器
 func NewNetworkCaptureBuilder() *NetworkCaptureBuilder {
-	return &NetworkCaptureBuilder{}
+	return &NetworkCaptureBuilder{
+		config: DefaultCaptureConfig(),
+	}
 }
 
+// WithInterface 设置网络接口
 func (b *NetworkCaptureBuilder) WithInterface(iface string) *NetworkCaptureBuilder {
-	b.nic = iface
+	b.config.Interface = iface
 	return b
 }
 
-func (b *NetworkCaptureBuilder) WithBPFFilter(filter string) *NetworkCaptureBuilder {
-	b.bpfFilter = filter
+// WithBPFFilter 设置BPF过滤器
+func (b *NetworkCaptureBuilder) WithBPFFilter(filter []bpf.RawInstruction) *NetworkCaptureBuilder {
+	b.config.BPFFilter = filter
 	return b
 }
 
+// WithBufferSize 设置缓冲区大小
 func (b *NetworkCaptureBuilder) WithBufferSize(size int) *NetworkCaptureBuilder {
-	b.bufferSize = size
+	b.config.BufferSize = size
 	return b
 }
 
+// WithRingSize 设置环形缓冲区大小
+func (b *NetworkCaptureBuilder) WithRingSize(size int) *NetworkCaptureBuilder {
+	b.config.RingSize = size
+	return b
+}
+
+// WithWorkerCount 设置工作协程数量
+func (b *NetworkCaptureBuilder) WithWorkerCount(count int) *NetworkCaptureBuilder {
+	b.config.WorkerCount = count
+	return b
+}
+
+// WithMTU 设置MTU
+func (b *NetworkCaptureBuilder) WithMTU(mtu int) *NetworkCaptureBuilder {
+	b.config.MTU = mtu
+	return b
+}
+
+// WithLocalAddresses 设置本机地址
+func (b *NetworkCaptureBuilder) WithLocalAddresses(addresses []string) *NetworkCaptureBuilder {
+	b.config.LocalAddresses = addresses
+	return b
+}
+
+// WithSIPFilter 设置SIP过滤器
+func (b *NetworkCaptureBuilder) WithSIPFilter(port uint32) *NetworkCaptureBuilder {
+	filter, err := utils.PrebuildFilter.SIP(port)
+	if err == nil {
+		b.config.BPFFilter = filter
+	}
+	return b
+}
+
+// Build 构建DataSource
 func (b *NetworkCaptureBuilder) Build() (types.DataSource, error) {
-	return &networkCapture{
-		nic:        b.nic,
-		bpfFilter:  b.bpfFilter,
-		bufferSize: b.bufferSize,
-		closed:     make(chan struct{}),
-	}, nil
+	// 验证配置
+	if b.config.Interface == "" {
+		return nil, fmt.Errorf("interface is required")
+	}
+
+	if b.config.WorkerCount <= 0 {
+		b.config.WorkerCount = 4
+	}
+
+	if b.config.RingSize <= 0 {
+		b.config.RingSize = 1024
+	}
+
+	if len(b.config.LocalAddresses) == 0 {
+		b.config.LocalAddresses = GetLocalAddresses()
+	}
+
+	return newNetworkCapture(b.config), nil
 }
