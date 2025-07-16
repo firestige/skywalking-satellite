@@ -25,6 +25,7 @@ import (
 	"github.com/apache/skywalking-satellite/plugins/server/grpc"
 	"github.com/apache/skywalking-satellite/plugins/server/http"
 	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket"
+	"github.com/apache/skywalking-satellite/plugins/server/local/packet"
 )
 
 // RegisterServerPlugins register the used server plugins.
@@ -35,6 +36,7 @@ func RegisterServerPlugins() {
 		new(grpc.Server),
 		new(http.Server),
 		new(afpacket.Server),
+		packet.NewServer(),
 	}
 	for _, server := range servers {
 		plugin.RegisterPlugin(server)

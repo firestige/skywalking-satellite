@@ -3,19 +3,19 @@ package types
 import (
 	"context"
 	"sync"
+)
 
-	"github.com/google/gopacket"
+const (
+	TCP = "TCP"
+	UDP = "UDP"
+	SIP = "SIP"
+	ESL = "ESL"
 )
 
 type Lifecycle interface {
 	Prepare() error
 	Start(ctx context.Context, wg *sync.WaitGroup) error
 	Close() error
-}
-
-type DataSource interface {
-	Lifecycle
-	Fetch(ctx context.Context) (gopacket.Packet, error)
 }
 
 type RawFrameData struct {
@@ -32,6 +32,26 @@ type Connection struct {
 	DestHost string
 	DstPort  int
 	Protocol string
+}
+
+type DataSource interface {
+	Lifecycle
+	Fetch(ctx context.Context) (RawFrameData, error)
+}
+
+type PacketStream interface {
+}
+
+type FrameFilter interface {
+	Filter(frame RawFrameData, chain FrameFilterChain)
+}
+
+type FrameFilterChain interface {
+	Filter(frame RawFrameData)
+}
+
+type FrameHandler interface {
+	Handle(frame RawFrameData) error
 }
 
 // StreamProcessor 流处理器接口
@@ -65,14 +85,10 @@ type SinkFunc func(frame RawFrameData) error
 type AggregatorFunc func(frames []RawFrameData) ([]RawFrameData, error)
 
 type Dispatcher interface {
-	SinkFunc
+	// 实现 SinkFunc 的功能
+	Sink(frame RawFrameData) error
+	// 扩展的分发方法，支持上下文
 	Dispatch(ctx context.Context, frame RawFrameData) error
-}
-
-type FrameHandler interface {
-	Handle(ctx context.Context, frame RawFrameData) error
-	Name() string
-	IsSupported(frame RawFrameData) bool
 }
 
 type HandlerManager interface {
