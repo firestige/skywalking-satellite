@@ -70,6 +70,18 @@ func (s *Server) GetServer() interface{} {
 }
 
 func (s *Server) RegisterHandler(protocol string, name string, handler func(data *types.RawFrameData) error) {
+	if s.receiverMapping == nil {
+		s.receiverMapping = make(map[string]map[string]func(*types.RawFrameData) error)
+	}
+	if _, exists := s.receiverMapping[protocol]; !exists {
+		s.receiverMapping[protocol] = make(map[string]func(*types.RawFrameData) error)
+	}
+	if _, exists := s.receiverMapping[protocol][name]; exists {
+		log.Logger.WithFields(logrus.Fields{
+			"protocol": protocol,
+			"name":     name,
+		}).Warn("Handler already exists, overwriting")
+	}
 	s.receiverMapping[protocol][name] = handler
 	log.Logger.WithFields(logrus.Fields{
 		"protocol": protocol,
@@ -146,7 +158,16 @@ func (s *Server) Close() error {
 // buildPipeline creates and configures the pipeline based on server configuration
 func (s *Server) buildPipeline() (*Pipeline, error) {
 	// Create data source with configuration
-	bpfFilter, err := utils.NewFilterBuilder().IPv4OrDrop().TCP(utils.JumpToIfNoMatch("check_udp")).PortOrAccept(5060, "check_udp").UDP(utils.WithLabel("check_udp").OrDrop()).PortOrDrop(5060).Compile()
+	bpfFilter, err := utils.NewFilterBuilder().
+		IPv4OrDrop().
+		TCP(utils.JumpToIfNoMatch("check_udp")).
+		PortOrAccept(5060, "check_udp").
+		UDP(utils.WithLabel("check_udp").OrDrop()).
+		PortOrDrop(5060).
+		Accept().
+		Drop().
+		Compile()
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile BPF filter: %v", err)
 	}

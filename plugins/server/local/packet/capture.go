@@ -31,10 +31,11 @@ type CaptureConfig struct {
 }
 
 // DefaultCaptureConfig 默认配置
+// todo builder写的有问题，配置没生效，生效的是这里的配置
 func DefaultCaptureConfig() *CaptureConfig {
 	return &CaptureConfig{
 		Interface:      "eth0",
-		SnapLen:        65535,
+		SnapLen:        65536,
 		RingSize:       1024,
 		WorkerCount:    4,
 		MTU:            1500,

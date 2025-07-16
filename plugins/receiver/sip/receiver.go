@@ -129,7 +129,7 @@ func buildSegment(source *types.RawFrameData) *agent.SegmentObject {
 		Service:         "SIP Service",
 		ServiceInstance: "SIP Instance",
 		Spans: []*agent.SpanObject{
-			&agent.SpanObject{
+			{
 				SpanId:        0,
 				SpanType:      agent.SpanType_Entry,
 				SpanLayer:     agent.SpanLayer_Unknown,
@@ -154,7 +154,31 @@ func buildSegment(source *types.RawFrameData) *agent.SegmentObject {
 }
 
 func buildLogData(source *types.RawFrameData) *logging.LogData {
-	return &logging.LogData{}
+	return &logging.LogData{
+		Service:         "SIP Service",
+		ServiceInstance: "SIP Instance",
+		Timestamp:       source.Timestamp,
+		Endpoint:        "SIP Endpoint",
+		Body: &logging.LogDataBody{
+			Content: &logging.LogDataBody_Text{
+				Text: &logging.TextLog{
+					Text: string(source.Data),
+				},
+			},
+		},
+		Tags: &logging.LogTags{
+			Data: []*common.KeyStringValuePair{
+				{
+					Key:   "sip.protocol",
+					Value: "SIP",
+				},
+				{
+					Key:   "sip.direction",
+					Value: source.Direction,
+				},
+			},
+		},
+	}
 }
 
 func (r *Receiver) Channel() <-chan *v1.SniffData {
