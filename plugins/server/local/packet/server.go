@@ -7,9 +7,9 @@ import (
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
-	"github.com/apache/skywalking-satellite/plugins/server/api"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/utils"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -18,72 +18,79 @@ const (
 	Description = "A server plugin for packet capture and processing"
 )
 
-type serverAdapter struct {
+type Server struct {
 	config.CommonFields
 
 	Interface      string   `mapstructure:"interface"`       // Network interface to capture on
-	BufferSize     int      `mapstructure:"buffer_size"`     // Ring buffer size
 	RingSize       int      `mapstructure:"ring_size"`       // Ring buffer size
 	WorkerCount    int      `mapstructure:"worker_count"`    // Number of worker goroutines
 	MTU            int      `mapstructure:"mtu"`             // Maximum Transmission Unit
 	LocalAddresses []string `mapstructure:"local_addresses"` // Local addresses to filter
 
-	pipeline *Pipeline
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       *sync.WaitGroup
+	receiverMapping map[string]map[string]func(*types.RawFrameData) error // Mapping of protocol to handler
+	pipeline        *Pipeline
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              *sync.WaitGroup
 }
 
-func NewServer() api.Server {
-	return &serverAdapter{}
-}
-
-func (s *serverAdapter) Name() string {
+func (s *Server) Name() string {
 	return Name
 }
 
-func (s *serverAdapter) ShowName() string {
+func (s *Server) ShowName() string {
 	return ShowName
 }
 
-func (s *serverAdapter) Description() string {
+func (s *Server) Description() string {
 	return Description
 }
 
-func (s *serverAdapter) DefaultConfig() string {
+func (s *Server) DefaultConfig() string {
 	return `
 # Network interface to capture packets on (default: any)
 interface: "any"
 
 # Ring buffer size for packet capture (default: 65536)
-buffer_size: 65536
+ring_size: 65536
 
-# BPF filter expression for packet filtering (default: empty, captures all)
-filter: ""
+# worker_count: Number of worker goroutines to process packets (default: 4)
+worker_count: 4
 
-# Statistics reporting interval in seconds (default: 10)
-stats_interval: 10
+# MTU (Maximum Transmission Unit) size in bytes (default: 1500)
+mtu: 1500
 
-# Drop count threshold for reporting warnings (default: 1000)
-drop_threshold: 1000
+# Local addresses to capture packets from (default: empty, captures all)
+local_addresses: []
 `
 }
 
-func (s *serverAdapter) GetServer() interface{} {
+func (s *Server) GetServer() interface{} {
 	return s
 }
 
-func (s *serverAdapter) Prepare() error {
+func (s *Server) RegisterHandler(protocol string, name string, handler func(data *types.RawFrameData) error) {
+	s.receiverMapping[protocol][name] = handler
+	log.Logger.WithFields(logrus.Fields{
+		"protocol": protocol,
+		"name":     name,
+	}).Info("Registered packet handler")
+}
+
+func (s *Server) Prepare() error {
 	log.Logger.WithField("server", s.Name()).Info("packet server is preparing...")
 
 	// Set default values if not configured
 	if s.Interface == "" {
 		s.Interface = "any"
 	}
-	if s.BufferSize <= 0 {
-		s.BufferSize = 65536
-	}
 
+	log.Logger.WithField("server", s.Name()).Info("packet server prepared successfully")
+	return nil
+}
+
+func (s *Server) Start() error {
+	log.Logger.WithField("server", s.Name()).Info("packet server is about to start...")
 	// Build pipeline with configuration
 	pipeline, err := s.buildPipeline()
 	if err != nil {
@@ -96,11 +103,6 @@ func (s *serverAdapter) Prepare() error {
 		return fmt.Errorf("failed to prepare pipeline: %v", err)
 	}
 
-	log.Logger.WithField("server", s.Name()).Info("packet server prepared successfully")
-	return nil
-}
-
-func (s *serverAdapter) Start() error {
 	log.Logger.WithField("server", s.Name()).Info("packet server is starting...")
 
 	// Create context and wait group for pipeline lifecycle management
@@ -116,7 +118,7 @@ func (s *serverAdapter) Start() error {
 	return nil
 }
 
-func (s *serverAdapter) Close() error {
+func (s *Server) Close() error {
 	log.Logger.WithField("server", s.Name()).Info("packet server is closing...")
 
 	// Cancel context to signal pipeline to stop
@@ -142,7 +144,7 @@ func (s *serverAdapter) Close() error {
 }
 
 // buildPipeline creates and configures the pipeline based on server configuration
-func (s *serverAdapter) buildPipeline() (*Pipeline, error) {
+func (s *Server) buildPipeline() (*Pipeline, error) {
 	// Create data source with configuration
 	bpfFilter, err := utils.NewFilterBuilder().IPv4OrDrop().TCP(utils.JumpToIfNoMatch("check_udp")).PortOrAccept(5060, "check_udp").UDP(utils.WithLabel("check_udp").OrDrop()).PortOrDrop(5060).Compile()
 	if err != nil {
@@ -152,7 +154,6 @@ func (s *serverAdapter) buildPipeline() (*Pipeline, error) {
 	dataSource, err := NewNetworkCaptureBuilder().
 		WithInterface(s.Interface).
 		WithBPFFilter(bpfFilter).
-		WithBufferSize(s.BufferSize).
 		WithRingSize(s.RingSize).
 		WithWorkerCount(s.WorkerCount).
 		WithMTU(s.MTU).
@@ -163,7 +164,13 @@ func (s *serverAdapter) buildPipeline() (*Pipeline, error) {
 	}
 
 	// Create frame handler/dispatcher
-	dispatcher, err := NewDispatcherBuilder().WithHandler(types.SIP, "", nil).WithHandler(types.ESL, "", nil).Build()
+	builder := NewDispatcherBuilder()
+	for protocol, handlers := range s.receiverMapping {
+		for name, handler := range handlers {
+			builder.WithHandler(protocol, name, handler)
+		}
+	}
+	dispatcher, err := builder.Build()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create frame handler: %v", err)
 	}

@@ -21,7 +21,6 @@ type CaptureConfig struct {
 	Interface      string               // 网络接口名称
 	BPFFilter      []bpf.RawInstruction // BPF过滤规则
 	SnapLen        int                  // 抓包长度
-	BufferSize     int                  // 缓冲区大小
 	RingSize       int                  // 环形缓冲区大小
 	WorkerCount    int                  // 工作协程数量
 	MTU            int                  // 最大传输单元
@@ -36,7 +35,6 @@ func DefaultCaptureConfig() *CaptureConfig {
 	return &CaptureConfig{
 		Interface:      "eth0",
 		SnapLen:        65535,
-		BufferSize:     1024 * 1024 * 2, // 2MB
 		RingSize:       1024,
 		WorkerCount:    4,
 		MTU:            1500,
@@ -512,12 +510,6 @@ func (b *NetworkCaptureBuilder) WithInterface(iface string) *NetworkCaptureBuild
 // WithBPFFilter 设置BPF过滤器
 func (b *NetworkCaptureBuilder) WithBPFFilter(filter []bpf.RawInstruction) *NetworkCaptureBuilder {
 	b.config.BPFFilter = filter
-	return b
-}
-
-// WithBufferSize 设置缓冲区大小
-func (b *NetworkCaptureBuilder) WithBufferSize(size int) *NetworkCaptureBuilder {
-	b.config.BufferSize = size
 	return b
 }
 

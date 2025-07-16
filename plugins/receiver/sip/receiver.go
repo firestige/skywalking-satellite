@@ -9,8 +9,8 @@ import (
 	forwarder "github.com/apache/skywalking-satellite/plugins/forwarder/api"
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativelog"
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativetracing"
-	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket"
-	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
+	"github.com/apache/skywalking-satellite/plugins/server/local/packet"
+	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 	"github.com/ghettovoice/gosip/sip"
 	"github.com/ghettovoice/gosip/sip/parser"
 	"google.golang.org/protobuf/proto"
@@ -30,7 +30,7 @@ type Receiver struct {
 	config.CommonFields
 
 	OutputChannel chan *v1.SniffData
-	Server        *afpacket.Server
+	Server        *packet.Server
 }
 
 func (r *Receiver) Name() string {
@@ -50,9 +50,9 @@ func (r *Receiver) DefaultConfig() string {
 }
 
 func (r *Receiver) RegisterHandler(server interface{}) {
-	r.Server = server.(*afpacket.Server)
+	r.Server = server.(*packet.Server)
 	r.OutputChannel = make(chan *v1.SniffData, 1000)
-	r.Server.RegisterHandler("sip", r.packetHandler)
+	r.Server.RegisterHandler("SIP", "sip", r.packetHandler)
 }
 
 func (r *Receiver) RegisterSyncInvoker(_ module.SyncInvoker) {
@@ -91,7 +91,7 @@ func buildSegment(source *types.RawFrameData) *agent.SegmentObject {
 	// 创建适配器
 	adapter := &LoggerAdapter{logger: log.Logger}
 
-	msg, err := parser.NewPacketParser(adapter).ParseMessage(source.Content)
+	msg, err := parser.NewPacketParser(adapter).ParseMessage(source.Data)
 	if err != nil {
 		log.Logger.Error("failed to parse SIP message:", err)
 		return nil

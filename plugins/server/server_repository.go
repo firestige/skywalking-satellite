@@ -36,7 +36,7 @@ func RegisterServerPlugins() {
 		new(grpc.Server),
 		new(http.Server),
 		new(afpacket.Server),
-		packet.NewServer(),
+		new(packet.Server),
 	}
 	for _, server := range servers {
 		plugin.RegisterPlugin(server)
