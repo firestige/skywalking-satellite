@@ -10,8 +10,8 @@ import (
 	forwarder "github.com/apache/skywalking-satellite/plugins/forwarder/api"
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativelog"
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativetracing"
-	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket"
-	"github.com/apache/skywalking-satellite/plugins/server/local/afpacket/types"
+	"github.com/apache/skywalking-satellite/plugins/server/local/packet"
+	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 	"google.golang.org/protobuf/proto"
 	common "skywalking.apache.org/repo/goapi/collect/common/v3"
 	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
@@ -29,7 +29,7 @@ type Receiver struct {
 	config.CommonFields
 
 	OutputChannel chan *v1.SniffData
-	Server        *afpacket.Server
+	Server        *packet.Server
 }
 
 func (r *Receiver) Name() string {
@@ -52,9 +52,9 @@ func (r *Receiver) DefaultConfig() string {
 }
 
 func (r *Receiver) RegisterHandler(server interface{}) {
-	r.Server = server.(*afpacket.Server)
+	r.Server = server.(*packet.Server)
 	r.OutputChannel = make(chan *v1.SniffData, 1000)
-	r.Server.RegisterHandler("esl", r.packetHandler)
+	r.Server.RegisterHandler("esl", "esl", r.packetHandler)
 }
 
 func (r *Receiver) RegisterSyncInvoker(_ module.SyncInvoker) {
@@ -63,7 +63,7 @@ func (r *Receiver) RegisterSyncInvoker(_ module.SyncInvoker) {
 
 func (r *Receiver) packetHandler(data *types.RawFrameData) error {
 	parser := &ESLParser{}
-	event, err := parser.ParseMessage(data.Content)
+	event, err := parser.ParseMessage(data.Data)
 	if err != nil {
 		log.Logger.Error("failed to parse ESL message:", err)
 		return nil
