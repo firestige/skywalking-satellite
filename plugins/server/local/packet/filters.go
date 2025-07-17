@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 )
 
@@ -46,7 +45,6 @@ func (f *frameFilterChain) Handler() types.FrameHandler {
 }
 
 func (f *frameFilterChain) Filter(frame *types.RawFrameData) {
-	log.Logger.Infof("Processing frame in chain: %s", string(frame.Data))
 	if f.currentFilter != nil && f.chain != nil {
 		f.currentFilter.Filter(frame, f.chain)
 	} else {

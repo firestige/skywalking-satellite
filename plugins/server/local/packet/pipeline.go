@@ -60,7 +60,10 @@ func (p *Pipeline) run() {
 	}()
 
 	log.Logger.Info("Pipeline started")
-	p.source.Start(p.ctx, p.wg)
+	if err := p.source.Start(p.ctx, p.wg); err != nil {
+		log.Logger.Error("Error starting source:", err)
+		return
+	}
 
 	for {
 		select {

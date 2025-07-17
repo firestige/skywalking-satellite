@@ -134,7 +134,7 @@ func (d *LengthFieldBaseDecoder) extractFrame(direction string) {
 		Data:       frameData,
 		Meta:       meta,
 		Connection: d.connection,
-		Timestamp:  time.Now().UnixNano(),
+		Timestamp:  time.Now().UnixNano() / 1e6, // 毫秒时间戳
 		Direction:  direction,
 	}
 

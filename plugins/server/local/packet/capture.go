@@ -385,7 +385,7 @@ func (nc *networkCapture) processUDPPacket(packetInfo *types.PacketInfo) {
 			"length":   fmt.Sprintf("%d", len(payload)),
 		},
 		Connection: connection,
-		Timestamp:  packetInfo.Timestamp.UnixNano(),
+		Timestamp:  packetInfo.Timestamp.UnixNano() / 1e6,
 		Direction:  direction,
 	}
 
