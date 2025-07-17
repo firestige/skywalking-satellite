@@ -60,6 +60,7 @@ func (p *Pipeline) run() {
 	}()
 
 	log.Logger.Info("Pipeline started")
+	p.source.Start(p.ctx, p.wg)
 
 	for {
 		select {

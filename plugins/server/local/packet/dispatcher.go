@@ -50,7 +50,7 @@ type dispatcher struct {
 
 func (d *dispatcher) Handle(frame *types.RawFrameData) error {
 	protocol := frame.Connection.Protocol
-	if handler, exists := d.handlerMapping[protocol]; exists {
+	if handler, exists := d.handlerMapping[protocol]; exists { // todo 如果protocol不存在，会报错吗？
 		handler.Handle(frame)
 		return nil
 	} else {
