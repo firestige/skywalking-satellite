@@ -13,8 +13,6 @@ import (
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativetracing"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
-	"github.com/ghettovoice/gosip/sip"
-	"github.com/ghettovoice/gosip/sip/parser"
 	"google.golang.org/protobuf/proto"
 	common "skywalking.apache.org/repo/goapi/collect/common/v3"
 	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
@@ -151,10 +149,14 @@ func (m *ContextCounterManager) GetStats() map[string]interface{} {
 
 type Receiver struct {
 	config.CommonFields
+	ServiceName     string `mapstructure:"service_name"`     // 服务名称
+	ServiceInstance string `mapstructure:"service_instance"` // 服务实例
 
 	OutputChannel  chan *v1.SniffData
 	Server         *packet.Server
 	counterManager *ContextCounterManager
+	sipParser      *SipParser
+	sessionManager *SessionManager
 }
 
 func (r *Receiver) Name() string {
@@ -177,6 +179,15 @@ func (r *Receiver) RegisterHandler(server interface{}) {
 	r.Server = server.(*packet.Server)
 	r.OutputChannel = make(chan *v1.SniffData, 1000)
 	r.counterManager = NewContextCounterManager()
+	r.sipParser = NewSipParser()
+	config := &SessionManagerConfig{
+		ServiceName:     r.ServiceName,
+		ServiceInstance: r.ServiceInstance,
+
+		SessionTTL:      5 * time.Minute, // 会话过期时间
+		CleanupInterval: 1 * time.Minute, // 自动清理间隔
+	}
+	r.sessionManager = NewSessionManager(*config)
 	r.Server.RegisterHandler("UDP", "sip", r.packetHandler)
 }
 
@@ -185,7 +196,23 @@ func (r *Receiver) RegisterSyncInvoker(_ module.SyncInvoker) {
 }
 
 func (r *Receiver) packetHandler(data *types.RawFrameData) error {
-	segment := r.buildSegment(data)
+	// 解析SIP消息
+	sipMessage, err := r.sipParser.Parse(data.Data)
+	if err != nil {
+		log.Logger.Error("failed to parse SIP message:", err)
+		return err
+	}
+
+	session, err := r.sessionManager.GetOrCreateSession(sipMessage)
+
+	// 构建跟踪段
+	segment := r.buildSegment(data, sipMessage, session)
+	if segment == nil {
+		log.Logger.Error("failed to build segment")
+		return err
+	}
+
+	// 发送跟踪数据
 	traceByte, _ := proto.Marshal(segment)
 	traceData := &v1.SniffData{
 		Name:      "sip-capture",
@@ -197,7 +224,9 @@ func (r *Receiver) packetHandler(data *types.RawFrameData) error {
 		},
 	}
 	r.OutputChannel <- traceData
-	packet := buildLogData(data, segment.TraceId, segment.TraceSegmentId, segment.Spans[0].SpanId)
+
+	// 构建并发送日志数据
+	packet := buildLogData(data, sipMessage, session)
 	packetByte, _ := proto.Marshal(packet)
 	logData := &v1.SniffData{
 		Name:      "sip-log",
@@ -214,68 +243,131 @@ func (r *Receiver) packetHandler(data *types.RawFrameData) error {
 	return nil
 }
 
-func (r *Receiver) buildSegment(source *types.RawFrameData) *agent.SegmentObject {
-	// 创建适配器
-	adapter := &LoggerAdapter{logger: log.Logger}
+// buildSegment 根据SIP消息构建跟踪段
+// SegmentObjectd的定义如下
+//
+//	{
+//	  TraceSegmentId string // 跟踪段ID,已经在session的segment中定义,不用修改
+//	  TraceId string // 跟踪ID,已经在session的segment中定义,不用修改
+//	  Service string // 服务名称,从配置文件中读取,在receiver的config中新增定义
+//	  ServiceInstance string // 服务实例名称,从配置文件中读取,在receiver的config中新增定义
+//	  Spans []*SpanObject // Span对象列表,已经在session的segment中定义,按照session中定义的currentSpan获取接下来要填写的span对象
+//	}
+//
+// SpanObject的定义如下
+//
+//	{
+//	  SpanId int32 // Span ID,已经在session的segment中定义,不用修改
+//	  ParentSpanId int32 // 父Span ID,这里默认所有的Span都是根Span,所以ParentSpanId为-1
+//	  StartTime int64 // Span开始时间,如果sipMessage是Request, 则从RawFrameData的Timestamp中获取,否则不填
+//	  EndTime int64 // Span结束时间,如果sipMessage是Response, 则从RawFrameData的Timestamp中获取,否则不填
+//	  OperationName string // 操作名称,根据sipMessage的类型构建,仅在没有值且sipMessage是Request时填入RequestLine,其他时候不填
+//	  SpanType SpanType // 这里仅在sipMessage是Request时处理, 如果sipMessage是inbound request, 则SpanType为Entry, outbound request为Exit, 否则为Local
+//	  SpanLayer SpanLayer // 这里默认是Unknown,因为SIP协议没有明确的层级
+//	  ComponentId int32 // 组件ID,这里默认是0,因为SIP协议没有明确的组件ID
+//	  Peer string // 对端地址,如果sipMessage是Request, 则从RawFrameData的RemoteAddress中获取, 否则不填
+//	  Tags []*KeyStringValuePair // 标签列表,这里将sipMessage的Headers转换为标签,如果sipMessage是Request, 则将Method作为标签
+//	  IsError bool // 是否为错误,如果sipMessage是Response且状态码大于等于400, 则为true, 否则为false
+//	}
+func (r *Receiver) buildSegment(source *types.RawFrameData, sipMessage SipMessage, session *Session) *agent.SegmentObject {
+	// 获取 session 中已经维护好的 segment 对象
+	segment := session.Segment
 
-	msg, err := parser.NewPacketParser(adapter).ParseMessage(source.Data)
-	if err != nil {
-		log.Logger.Error("failed to parse SIP message:", err)
-		return nil
+	// 获取当前需要处理的 span（按照 session 中的 CurrentSpan 索引）
+	if int(session.CurrentSpan) >= len(segment.Spans) {
+		log.Logger.Errorf("CurrentSpan index %d out of range for spans length %d", session.CurrentSpan, len(segment.Spans))
+		return segment
 	}
-	traceId, ok := msg.CallID()
-	if !ok {
-		log.Logger.Error("SIP message does not contain Call-ID header")
-		return nil
-	}
 
-	segmentId, ok := msg.CSeq()
-	if !ok {
-		log.Logger.Error("SIP message does not contain CSeq header")
-		return nil
-	}
+	currentSpan := segment.Spans[session.CurrentSpan]
 
-	// 使用上下文计数器管理器获取并递增计数器（基于 segmentId）
-	segmentIdStr := segmentId.Value()
-	contextCounter := r.counterManager.GetAndIncrement(segmentIdStr)
+	// 根据消息类型就地修改 span 对象
+	if sipMessage.IsRquest() {
+		// 处理请求消息
+		if req, ok := sipMessage.(SipRequest); ok {
+			// 设置 span 开始时间
+			currentSpan.StartTime = source.Timestamp
 
-	var operationName string
-	var isError bool
-	// 使用类型断言判断是请求还是响应
-	if req, ok := msg.(sip.Request); ok {
-		// 这是一个请求
-		operationName = string(req.Method()) + " " + req.Recipient().String()
-		isError = false // 请求通常不会标记为错误
-	} else if resp, ok := msg.(sip.Response); ok {
-		// 这是一个响应
-		operationName = strconv.Itoa(int(resp.StatusCode())) + " " + resp.Reason()
-		isError = resp.StatusCode() >= 400 // 响应状态码 >= 400 标记为错误
+			// 设置操作名称（仅在没有值时填入）
+			if currentSpan.OperationName == "" {
+				currentSpan.OperationName = source.Direction + req.RequestLine()
+			}
+
+			// 设置 SpanType（判断是 inbound 还是 outbound request）
+			// 这里简化处理，可以根据实际需求调整判断逻辑
+			switch source.Direction {
+			case "inbound":
+				currentSpan.SpanType = agent.SpanType_Entry
+			case "outbound":
+				currentSpan.SpanType = agent.SpanType_Exit
+			default:
+				currentSpan.SpanType = agent.SpanType_Local
+			}
+
+			// 设置 SpanLayer
+			currentSpan.SpanLayer = agent.SpanLayer_Unknown
+
+			// 设置组件ID
+			currentSpan.ComponentId = 0
+
+			// 设置对端地址
+			currentSpan.Peer = source.Connection.SrcHost + ":" + strconv.Itoa(source.Connection.SrcPort)
+
+			// 设置标签
+			tags := make([]*common.KeyStringValuePair, 0)
+
+			// 将 Method 作为标签添加
+			tags = append(tags, &common.KeyStringValuePair{
+				Key:   "sip.method",
+				Value: req.Method(),
+			})
+
+			// 将 Headers 转换为标签
+			for key, value := range sipMessage.Headers() {
+				tags = append(tags, &common.KeyStringValuePair{
+					Key:   "sip.header." + key,
+					Value: value,
+				})
+			}
+
+			currentSpan.Tags = tags
+			currentSpan.IsError = false
+		}
 	} else {
-		log.Logger.Error("unknown SIP message type")
-		return nil
+		// 处理响应消息
+		if resp, ok := sipMessage.(SipResponse); ok {
+			// 设置 span 结束时间
+			currentSpan.EndTime = source.Timestamp
+
+			// 设置错误状态
+			currentSpan.IsError = resp.Status() >= 400
+
+			// 添加响应相关的标签
+			if currentSpan.Tags == nil {
+				currentSpan.Tags = make([]*common.KeyStringValuePair, 0)
+			}
+
+			currentSpan.Tags = append(currentSpan.Tags, &common.KeyStringValuePair{
+				Key:   "sip.status_code",
+				Value: strconv.Itoa(resp.Status()),
+			})
+
+			currentSpan.Tags = append(currentSpan.Tags, &common.KeyStringValuePair{
+				Key:   "sip.status_line",
+				Value: resp.StatusLine(),
+			})
+
+			// 处理响应后，将 CurrentSpan 减 1，指向之前一个请求的 span
+			if session.CurrentSpan > 0 {
+				session.CurrentSpan--
+			}
+		}
 	}
 
-	return &agent.SegmentObject{
-		TraceSegmentId:  segmentIdStr,
-		TraceId:         traceId.Value(),
-		Service:         "SIP Service",
-		ServiceInstance: "SIP Instance",
-		Spans: []*agent.SpanObject{
-			{
-				SpanId:        int32(contextCounter), // 使用上下文计数器作为 SpanId，从 0 开始
-				ParentSpanId:  -1,
-				StartTime:     source.Timestamp,
-				EndTime:       source.Timestamp + 1000, // 假设处理时间为1000毫秒
-				OperationName: operationName,
-				SpanType:      agent.SpanType_Local,
-				SpanLayer:     agent.SpanLayer_Unknown,
-				IsError:       isError,
-			},
-		},
-	}
+	return segment
 }
 
-func buildLogData(source *types.RawFrameData, traceId string, segmentId string, spanId int32) *logging.LogData {
+func buildLogData(source *types.RawFrameData, message SipMessage, session *Session) *logging.LogData {
 	return &logging.LogData{
 		Service:         "SIP Service",
 		ServiceInstance: "SIP Instance",
@@ -302,9 +394,9 @@ func buildLogData(source *types.RawFrameData, traceId string, segmentId string, 
 			},
 		},
 		TraceContext: &logging.TraceContext{
-			TraceId:        traceId,
-			TraceSegmentId: segmentId,
-			SpanId:         spanId,
+			TraceId:        session.Segment.TraceId,
+			TraceSegmentId: session.Segment.TraceSegmentId,
+			SpanId:         session.CurrentSpan,
 		},
 	}
 }
