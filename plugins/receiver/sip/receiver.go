@@ -223,10 +223,13 @@ func (r *Receiver) buildSegment(source *types.RawFrameData) *agent.SegmentObject
 		log.Logger.Error("failed to parse SIP message:", err)
 		return nil
 	}
-	traceId, ok := msg.CallID()
+	var traceId string
+	callId, ok := msg.CallID()
 	if !ok {
 		log.Logger.Error("SIP message does not contain Call-ID header")
 		return nil
+	} else {
+		traceId = "SNIFFER-" + callId.Value() // 确保 traceId 有前缀
 	}
 
 	segmentId, ok := msg.CSeq()
@@ -257,7 +260,7 @@ func (r *Receiver) buildSegment(source *types.RawFrameData) *agent.SegmentObject
 
 	return &agent.SegmentObject{
 		TraceSegmentId:  segmentIdStr,
-		TraceId:         traceId.Value(),
+		TraceId:         traceId,
 		Service:         "SIP Service",
 		ServiceInstance: "SIP Instance",
 		Spans: []*agent.SpanObject{
