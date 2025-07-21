@@ -26,6 +26,7 @@ type Server struct {
 	WorkerCount    int      `mapstructure:"worker_count"`    // Number of worker goroutines
 	MTU            int      `mapstructure:"mtu"`             // Maximum Transmission Unit
 	LocalAddresses []string `mapstructure:"local_addresses"` // Local addresses to filter
+	Ports          []int    `mapstructure:"ports"`           // Ports to filter
 
 	receiverMapping map[string]map[string]func(*types.RawFrameData) error // Mapping of protocol to handler
 	pipeline        *Pipeline
@@ -61,7 +62,19 @@ worker_count: 4
 mtu: 1500
 
 # Local addresses to capture packets from (default: empty, captures all)
+# Use YAML array syntax:
+# local_addresses: ["192.168.1.100", "10.0.0.1", "172.16.0.1"]
+# Or YAML list syntax:
+# local_addresses:
+#   - "192.168.1.100"
+#   - "10.0.0.1"
+#   - "172.16.0.1"
 local_addresses: []
+
+# Ports to filter packets on (default: empty, captures all)
+# Use YAML array syntax:
+# ports: [5060, 8080]
+ports: []
 `
 }
 
@@ -158,12 +171,18 @@ func (s *Server) Close() error {
 // buildPipeline creates and configures the pipeline based on server configuration
 func (s *Server) buildPipeline() (*Pipeline, error) {
 	// Create data source with configuration
+	// Convert s.Ports from []int to []uint32
+	var portsUint32 []uint32
+	for _, p := range s.Ports {
+		portsUint32 = append(portsUint32, uint32(p))
+	}
+
 	bpfFilter, err := utils.NewFilterBuilder().
 		IPv4OrDrop().
 		TCP(utils.JumpToIfNoMatch("check_udp")).
-		PortOrAccept(5060, "check_udp").
+		PortsOrAccept(portsUint32, "check_udp").
 		UDP(utils.WithLabel("check_udp").OrDrop()).
-		PortOrDrop(5060).
+		PortsOrDrop(portsUint32).
 		Accept().
 		Drop().
 		Compile()

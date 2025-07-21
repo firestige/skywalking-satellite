@@ -462,6 +462,84 @@ func (b *filterBuilder) PortOrDrop(port uint32) *filterBuilder {
 	return b.Port(port, JumpToIfMatch(LabelAccept), OrDrop())
 }
 
+// PortsOrDrop adds multiple port checks, accepts if any match, drops if none match
+func (b *filterBuilder) PortsOrDrop(ports []uint32) *filterBuilder {
+	if b.err != nil {
+		return b
+	}
+
+	if len(ports) == 0 {
+		return b.Drop()
+	}
+
+	// Validate all ports first
+	for _, port := range ports {
+		if err := b.validatePort(port); err != nil {
+			b.err = err
+			return b
+		}
+	}
+
+	// Check each port, if any matches jump to accept
+	for i, port := range ports {
+		// For all ports except the last one, jump to accept if match, continue if no match
+		if i < len(ports)-1 {
+			b.Port(port, JumpToIfMatch(LabelAccept))
+		} else {
+			// For the last port, jump to accept if match, drop if no match
+			b.Port(port, JumpToIfMatch(LabelAccept), OrDrop())
+		}
+	}
+
+	return b
+}
+
+// PortsOrAccept adds multiple port checks, accepts if any match, jumps to label if none match
+func (b *filterBuilder) PortsOrAccept(ports []uint32, noMatchJumpTo string) *filterBuilder {
+	if b.err != nil {
+		return b
+	}
+
+	if len(ports) == 0 {
+		// Create unconditional jump by loading 0 and comparing with 0 (always true)
+		b.instructions = append(b.instructions, bpf.LoadConstant{Dst: bpf.RegA, Val: 0})
+		b.instructions = append(b.instructions, bpf.JumpIf{
+			Cond:      bpf.JumpEqual,
+			Val:       0,
+			SkipTrue:  0, // Will be resolved later
+			SkipFalse: 0,
+		})
+
+		b.jumps = append(b.jumps, jumpPlaceholder{
+			instructionIndex: len(b.instructions) - 1,
+			targetLabel:      noMatchJumpTo,
+			isSkipTrue:       true,
+		})
+		return b
+	}
+
+	// Validate all ports first
+	for _, port := range ports {
+		if err := b.validatePort(port); err != nil {
+			b.err = err
+			return b
+		}
+	}
+
+	// Check each port, if any matches jump to accept
+	for i, port := range ports {
+		// For all ports except the last one, jump to accept if match, continue if no match
+		if i < len(ports)-1 {
+			b.Port(port, JumpToIfMatch(LabelAccept))
+		} else {
+			// For the last port, jump to accept if match, jump to specified label if no match
+			b.Port(port, JumpToIfMatch(LabelAccept), JumpToIfNoMatch(noMatchJumpTo))
+		}
+	}
+
+	return b
+}
+
 // Accept adds packet acceptance instruction and creates accept label
 func (b *filterBuilder) Accept() *filterBuilder {
 	if b.err != nil {
@@ -524,13 +602,16 @@ func (b *filterBuilder) resolveJumps() error {
 
 		// Update jump instruction
 		jumpInst := b.instructions[jump.instructionIndex]
-		if jumpIf, ok := jumpInst.(bpf.JumpIf); ok {
+		switch inst := jumpInst.(type) {
+		case bpf.JumpIf:
 			if jump.isSkipTrue {
-				jumpIf.SkipTrue = uint8(skipCount)
+				inst.SkipTrue = uint8(skipCount)
 			} else {
-				jumpIf.SkipFalse = uint8(skipCount)
+				inst.SkipFalse = uint8(skipCount)
 			}
-			b.instructions[jump.instructionIndex] = jumpIf
+			b.instructions[jump.instructionIndex] = inst
+		default:
+			return fmt.Errorf("unsupported jump instruction type at index %d", jump.instructionIndex)
 		}
 	}
 

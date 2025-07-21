@@ -52,7 +52,7 @@ func (r *Receiver) DefaultConfig() string {
 	return `
 service_name: "SIP Service"
 service_instance: "SIP Instance"
-	`
+`
 }
 
 func (r *Receiver) RegisterHandler(server interface{}) {
