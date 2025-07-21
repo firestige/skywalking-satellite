@@ -18,16 +18,6 @@ const (
 	DefaultSessionCleanupInterval = 5 * time.Minute  // 默认清理检查间隔
 )
 
-// 会话对象，主要通过callId和cseq来唯一标识一个SIP会话中的请求和响应
-type Session struct {
-	CallId       string // SIP Call ID
-	CurrentCseq  string // 当前 CSeq，Cseq一般由数字和方法组成，如 "1 INVITE"
-	CurrentSpan  int32  // 当前 span ID，表示当前需要处理的 span
-	Segment      *agent.SegmentObject
-	LastModified time.Time    // 会话最后修改时间
-	mu           sync.RWMutex // 保护并发访问
-}
-
 // SessionManagerConfig 会话管理器配置
 type SessionManagerConfig struct {
 	ServiceName     string        // 服务名称
@@ -46,16 +36,17 @@ type SessionManagerConfig struct {
 // 需要处理并发安全问题，可能需要使用锁或其他同步机制
 // 需要考虑性能和资源管理，避免内存泄漏或过多的 goroutines
 // 需要提供 Prepare 方法以便在启动前进行必要的初始化
-type SessionManager struct {
-	sessions        map[string]*Session // 使用 CallID 作为键
-	mu              sync.RWMutex        // 保护并发访问
-	config          SessionManagerConfig
-	cleanupTicker   *time.Ticker
-	stopCleanupChan chan struct{}
+type sessionManager struct {
+	sessions           map[string]*Session               // 使用 CallID 作为键
+	onRemoveSessionFns map[string]func(session *Session) // 存储 CallID 到删除函数的映射
+	mu                 sync.RWMutex                      // 保护并发访问
+	config             SessionManagerConfig
+	cleanupTicker      *time.Ticker
+	stopCleanupChan    chan struct{}
 }
 
 // NewSessionManager 创建新的会话管理器
-func NewSessionManager(config SessionManagerConfig) *SessionManager {
+func NewSessionManager(config SessionManagerConfig) SipSessionManager {
 	// 设置默认值
 	if config.SessionTTL == 0 {
 		config.SessionTTL = DefaultSessionTTL
@@ -64,14 +55,14 @@ func NewSessionManager(config SessionManagerConfig) *SessionManager {
 		config.CleanupInterval = DefaultSessionCleanupInterval
 	}
 
-	return &SessionManager{
+	return &sessionManager{
 		sessions:        make(map[string]*Session),
 		config:          config,
 		stopCleanupChan: make(chan struct{}),
 	}
 }
 
-func (sm *SessionManager) Prepare() error {
+func (sm *sessionManager) Prepare() error {
 	// 初始化会话管理器
 	sm.sessions = make(map[string]*Session)
 
@@ -85,7 +76,7 @@ func (sm *SessionManager) Prepare() error {
 }
 
 // startAutoCleanup 启动自动清理机制
-func (sm *SessionManager) startAutoCleanup() {
+func (sm *sessionManager) startAutoCleanup() {
 	sm.cleanupTicker = time.NewTicker(sm.config.CleanupInterval)
 
 	go func() {
@@ -106,7 +97,7 @@ func (sm *SessionManager) startAutoCleanup() {
 }
 
 // performCleanup 执行会话清理
-func (sm *SessionManager) performCleanup() {
+func (sm *sessionManager) performCleanup() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -127,6 +118,10 @@ func (sm *SessionManager) performCleanup() {
 	// 删除过期的会话
 	for _, callId := range expiredSessions {
 		delete(sm.sessions, callId)
+		fn := sm.onRemoveSessionFns[callId]
+		if fn != nil {
+			fn(nil) // 执行删除函数，传入 nil 表示会话已删除
+		}
 		log.Logger.Infof("Cleaned up expired session for CallID: %s", callId)
 	}
 
@@ -136,7 +131,7 @@ func (sm *SessionManager) performCleanup() {
 }
 
 // Stop 停止会话管理器
-func (sm *SessionManager) Stop() {
+func (sm *sessionManager) Stop() {
 	if sm.stopCleanupChan != nil {
 		close(sm.stopCleanupChan)
 	}
@@ -149,7 +144,7 @@ func (sm *SessionManager) Stop() {
 }
 
 // updateSessionLastModified 更新会话的最后修改时间
-func (sm *SessionManager) updateSessionLastModified(session *Session) {
+func (sm *sessionManager) updateSessionLastModified(session *Session) {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	session.LastModified = time.Now()
@@ -184,7 +179,7 @@ func extractCSeqMethod(cseq string) (string, error) {
 	return parts[1], nil
 }
 
-func (sm *SessionManager) GetOrCreateSession(msg SipMessage) (*Session, error) {
+func (sm *sessionManager) GetOrCreateSession(msg SipMessage) (*Session, error) {
 	switch m := msg.(type) {
 	case SipRequest:
 		return sm.createSession(m)
@@ -202,7 +197,7 @@ func (sm *SessionManager) GetOrCreateSession(msg SipMessage) (*Session, error) {
 // 返回新创建或更新的会话对象
 // 可能需要处理并发问题，确保线程安全
 // 需要考虑性能和资源管理，避免内存泄漏或过多的 goroutines
-func (sm *SessionManager) createSession(req SipRequest) (*Session, error) {
+func (sm *sessionManager) createSession(req SipRequest) (*Session, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -301,7 +296,7 @@ func (sm *SessionManager) createSession(req SipRequest) (*Session, error) {
 	return newSession, nil
 }
 
-func (sm *SessionManager) getSession(resp SipResponse) (*Session, error) {
+func (sm *sessionManager) getSession(resp SipResponse) (*Session, error) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -324,8 +319,15 @@ func (sm *SessionManager) getSession(resp SipResponse) (*Session, error) {
 	return nil, fmt.Errorf("session not found for CallID: %s", callId)
 }
 
+func (sm *sessionManager) DoOnRemoveSession(callId string, fn func(session *Session)) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.onRemoveSessionFns[callId] = fn
+	log.Logger.Infof("Registered onRemoveSession function for CallID: %s", callId)
+}
+
 // 清理会话的方法（可选，用于资源管理）
-func (sm *SessionManager) removeSession(callId string) {
+func (sm *sessionManager) removeSession(callId string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -336,7 +338,7 @@ func (sm *SessionManager) removeSession(callId string) {
 }
 
 // 获取所有会话的方法（可选，用于调试和监控）
-func (sm *SessionManager) getAllSessions() map[string]*Session {
+func (sm *sessionManager) getAllSessions() map[string]*Session {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -348,7 +350,7 @@ func (sm *SessionManager) getAllSessions() map[string]*Session {
 }
 
 // GetStats 获取会话管理器统计信息
-func (sm *SessionManager) GetStats() map[string]interface{} {
+func (sm *sessionManager) GetStats() map[string]interface{} {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 

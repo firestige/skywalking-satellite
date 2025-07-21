@@ -2,7 +2,6 @@ package sip
 
 import (
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
@@ -24,128 +23,7 @@ const (
 	Name        = "sip-receiver"
 	ShowName    = "SIP Packet Receiver"
 	Description = "A receiver plugin for SIP (Session Initiation Protocol), used to receive events from SIP servers."
-
-	// 上下文计数器配置
-	CounterCleanupInterval = 1 * time.Minute // 清理检查间隔
-	CounterTTL             = 5 * time.Minute // 计数器过期时间
 )
-
-// CounterContext 表示单个 traceID 的上下文计数器
-type CounterContext struct {
-	count      int64     // 计数器值
-	lastAccess time.Time // 最后访问时间
-}
-
-// ContextCounterManager 管理所有 traceID 的上下文计数器
-type ContextCounterManager struct {
-	counters map[string]*CounterContext
-	mutex    sync.RWMutex
-	stopCh   chan struct{}
-}
-
-// NewContextCounterManager 创建新的上下文计数器管理器
-func NewContextCounterManager() *ContextCounterManager {
-	manager := &ContextCounterManager{
-		counters: make(map[string]*CounterContext),
-		stopCh:   make(chan struct{}),
-	}
-
-	// 启动清理 goroutine
-	go manager.cleanupExpiredCounters()
-
-	return manager
-}
-
-// GetAndIncrement 获取并递增指定 segmentID 的计数器
-func (m *ContextCounterManager) GetAndIncrement(segmentID string) int64 {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	now := time.Now()
-
-	// 检查是否存在计数器
-	if counter, exists := m.counters[segmentID]; exists {
-		counter.count++
-		counter.lastAccess = now
-		return counter.count
-	}
-
-	// 创建新的计数器，从 0 开始，第一次调用返回 0
-	m.counters[segmentID] = &CounterContext{
-		count:      0,
-		lastAccess: now,
-	}
-
-	return 0
-}
-
-// GetCurrentCount 获取指定 segmentID 的当前计数（不递增）
-func (m *ContextCounterManager) GetCurrentCount(segmentID string) int64 {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	if counter, exists := m.counters[segmentID]; exists {
-		return counter.count
-	}
-	return 0
-}
-
-// cleanupExpiredCounters 清理过期的计数器
-func (m *ContextCounterManager) cleanupExpiredCounters() {
-	ticker := time.NewTicker(CounterCleanupInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			m.performCleanup()
-		case <-m.stopCh:
-			return
-		}
-	}
-}
-
-// performCleanup 执行清理操作
-func (m *ContextCounterManager) performCleanup() {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	now := time.Now()
-	expiredKeys := make([]string, 0)
-
-	// 收集过期的 keys
-	for segmentID, counter := range m.counters {
-		if now.Sub(counter.lastAccess) > CounterTTL {
-			expiredKeys = append(expiredKeys, segmentID)
-		}
-	}
-
-	// 删除过期的计数器
-	for _, key := range expiredKeys {
-		delete(m.counters, key)
-		log.Logger.Debugf("Cleaned up expired counter for segmentID: %s", key)
-	}
-
-	if len(expiredKeys) > 0 {
-		log.Logger.Infof("Cleaned up %d expired counters", len(expiredKeys))
-	}
-}
-
-// Stop 停止计数器管理器
-func (m *ContextCounterManager) Stop() {
-	close(m.stopCh)
-}
-
-// GetStats 获取统计信息（用于监控）
-func (m *ContextCounterManager) GetStats() map[string]interface{} {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-
-	return map[string]interface{}{
-		"active_counters": len(m.counters),
-		"timestamp":       time.Now().Unix(),
-	}
-}
 
 type Receiver struct {
 	config.CommonFields
@@ -154,9 +32,8 @@ type Receiver struct {
 
 	OutputChannel  chan *v1.SniffData
 	Server         *packet.Server
-	counterManager *ContextCounterManager
 	sipParser      *SipParser
-	sessionManager *SessionManager
+	sessionManager SipSessionManager
 }
 
 func (r *Receiver) Name() string {
@@ -172,13 +49,15 @@ func (r *Receiver) Description() string {
 }
 
 func (r *Receiver) DefaultConfig() string {
-	return ``
+	return `
+service_name: "SIP Service"
+service_instance: "SIP Instance"
+	`
 }
 
 func (r *Receiver) RegisterHandler(server interface{}) {
 	r.Server = server.(*packet.Server)
 	r.OutputChannel = make(chan *v1.SniffData, 1000)
-	r.counterManager = NewContextCounterManager()
 	r.sipParser = NewSipParser()
 	config := &SessionManagerConfig{
 		ServiceName:     r.ServiceName,
@@ -414,7 +293,4 @@ func (r *Receiver) SupportForwarders() []forwarder.Forwarder {
 
 // Stop 停止接收器时清理资源
 func (r *Receiver) Stop() {
-	if r.counterManager != nil {
-		r.counterManager.Stop()
-	}
 }

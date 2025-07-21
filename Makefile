@@ -45,7 +45,7 @@ GQL_GEN = $(GO_PATH)/bin/gqlgen
 
 PLATFORMS := linux
 os = $(word 1, $@)
-ARCH = amd64
+ARCH = arm64
 
 SHELL = /bin/bash
 
