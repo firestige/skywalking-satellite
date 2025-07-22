@@ -15,35 +15,24 @@ type Pipeline struct {
 	dispatcher  types.FrameHandler
 
 	// 控制流
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     *sync.WaitGroup
+	ctx context.Context
+	wg  *sync.WaitGroup
 }
 
-func (p *Pipeline) Prepare() error {
+func (p *Pipeline) Prepare(ctx context.Context) error {
+	// 设置上下文和等待组
+	p.ctx = ctx
+	p.wg = &sync.WaitGroup{}
+
 	// 准备数据源
-	if err := p.source.Prepare(); err != nil {
-		return err
-	}
-
-	// 准备过滤链
-	if err := p.filterChain.Prepare(); err != nil {
-		return err
-	}
-
-	// 准备分发器
-	if err := p.dispatcher.Prepare(); err != nil {
+	if err := p.source.Prepare(ctx); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (p *Pipeline) Start(ctx context.Context, wg *sync.WaitGroup) error {
-	// 设置上下文和等待组
-	p.ctx, p.cancel = context.WithCancel(ctx)
-	p.wg = wg
-
+func (p *Pipeline) Start() error {
 	// 异步启动流水线处理
 	p.wg.Add(1)
 	go p.run()
@@ -60,7 +49,7 @@ func (p *Pipeline) run() {
 	}()
 
 	log.Logger.Info("Pipeline started")
-	if err := p.source.Start(p.ctx, p.wg); err != nil {
+	if err := p.source.Start(); err != nil {
 		log.Logger.Error("Error starting source:", err)
 		return
 	}
@@ -90,24 +79,14 @@ func (p *Pipeline) run() {
 func (p *Pipeline) Close() error {
 	log.Logger.Info("Closing pipeline...")
 
-	// 取消上下文
-	if p.cancel != nil {
-		p.cancel()
+	// 等待所有 goroutine 完成
+	if p.wg != nil {
+		p.wg.Wait()
 	}
 
 	// 关闭数据源
 	if err := p.source.Close(); err != nil {
 		log.Logger.Error("Error closing source:", err)
-	}
-
-	// 关闭过滤链
-	if err := p.filterChain.Close(); err != nil {
-		log.Logger.Error("Error closing filter chain:", err)
-	}
-
-	// 关闭分发器
-	if err := p.dispatcher.Close(); err != nil {
-		log.Logger.Error("Error closing dispatcher:", err)
 	}
 
 	log.Logger.Info("Pipeline closed")

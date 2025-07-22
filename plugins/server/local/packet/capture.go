@@ -58,22 +58,21 @@ type networkCapture struct {
 	tcpAssembler *TCPAssembler
 
 	// 工作协程管理
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx context.Context
+	wg  *sync.WaitGroup
 
 	// 数据通道
 	packetChan chan *types.PacketInfo
 	frameChan  chan *types.RawFrameData
 
 	// 对象池
-	packetPool sync.Pool
-	bufferPool sync.Pool
+	packetPool *sync.Pool
+	bufferPool *sync.Pool
 
 	// 状态
 	started bool
 	closed  bool
-	mu      sync.RWMutex
+	mu      *sync.RWMutex
 }
 
 // newNetworkCapture 创建网络抓包实例
@@ -96,7 +95,7 @@ func newNetworkCapture(config *CaptureConfig) *networkCapture {
 
 // initPools 初始化对象池
 func (nc *networkCapture) initPools() {
-	nc.packetPool = sync.Pool{
+	nc.packetPool = &sync.Pool{
 		New: func() interface{} {
 			return &types.PacketInfo{
 				Payload: make([]byte, 0, nc.config.MTU),
@@ -104,7 +103,7 @@ func (nc *networkCapture) initPools() {
 		},
 	}
 
-	nc.bufferPool = sync.Pool{
+	nc.bufferPool = &sync.Pool{
 		New: func() interface{} {
 			return make([]byte, 0, nc.config.MTU)
 		},
@@ -112,13 +111,16 @@ func (nc *networkCapture) initPools() {
 }
 
 // Prepare 准备抓包环境
-func (nc *networkCapture) Prepare() error {
+func (nc *networkCapture) Prepare(ctx context.Context) error {
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 
 	if nc.started {
 		return fmt.Errorf("capture already started")
 	}
+
+	nc.ctx = ctx
+	nc.wg = &sync.WaitGroup{}
 
 	log.Logger.Infof("Preparing network capture on interface: %s", nc.config.Interface)
 
@@ -154,7 +156,7 @@ func (nc *networkCapture) Prepare() error {
 }
 
 // Start 启动抓包
-func (nc *networkCapture) Start(ctx context.Context, wg *sync.WaitGroup) error {
+func (nc *networkCapture) Start() error {
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 
@@ -166,7 +168,6 @@ func (nc *networkCapture) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		return fmt.Errorf("capture not prepared")
 	}
 
-	nc.ctx, nc.cancel = context.WithCancel(ctx)
 	nc.started = true
 
 	log.Logger.Info("Starting network capture...")
@@ -187,11 +188,6 @@ func (nc *networkCapture) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	// 启动主抓包协程
 	nc.wg.Add(1)
 	go nc.captureLoop()
-
-	// 等待启动完成
-	if wg != nil {
-		wg.Done()
-	}
 
 	log.Logger.Info("Network capture started successfully")
 	return nil
@@ -459,11 +455,6 @@ func (nc *networkCapture) Close() error {
 	}
 
 	log.Logger.Info("Closing network capture...")
-
-	// 取消上下文
-	if nc.cancel != nil {
-		nc.cancel()
-	}
 
 	// 等待所有协程结束
 	nc.wg.Wait()

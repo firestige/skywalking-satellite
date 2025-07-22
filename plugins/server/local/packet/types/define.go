@@ -2,7 +2,6 @@ package types
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/google/gopacket"
@@ -17,8 +16,8 @@ const (
 )
 
 type Lifecycle interface {
-	Prepare() error
-	Start(ctx context.Context, wg *sync.WaitGroup) error
+	Prepare(ctx context.Context) error
+	Start() error
 	Close() error
 }
 
@@ -61,16 +60,13 @@ type PacketStream interface {
 }
 
 type FrameFilter interface {
-	Lifecycle
 	Filter(frame *RawFrameData, chain FrameFilterChain)
 }
 
 type FrameFilterChain interface {
-	Lifecycle
 	Filter(frame *RawFrameData)
 }
 
 type FrameHandler interface {
-	Lifecycle
 	Handle(frame *RawFrameData) error
 }

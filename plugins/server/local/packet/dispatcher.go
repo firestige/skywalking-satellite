@@ -3,7 +3,6 @@ package packet
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
@@ -30,11 +29,11 @@ func (a *frameHandlerAdapter) Name() string {
 	return a.name
 }
 
-func (a *frameHandlerAdapter) Prepare() error {
+func (a *frameHandlerAdapter) Prepare(ctx context.Context) error {
 	return nil // No preparation needed for dispatcher
 }
 
-func (a *frameHandlerAdapter) Start(ctx context.Context, wg *sync.WaitGroup) error {
+func (a *frameHandlerAdapter) Start() error {
 	// No specific start logic for dispatcher
 	return nil
 }
@@ -58,11 +57,11 @@ func (d *dispatcher) Handle(frame *types.RawFrameData) error {
 	}
 }
 
-func (d *dispatcher) Prepare() error {
+func (d *dispatcher) Prepare(ctx context.Context) error {
 	return nil // No preparation needed for dispatcher
 }
 
-func (d *dispatcher) Start(ctx context.Context, wg *sync.WaitGroup) error {
+func (d *dispatcher) Start() error {
 	// No specific start logic for dispatcher
 	return nil
 }

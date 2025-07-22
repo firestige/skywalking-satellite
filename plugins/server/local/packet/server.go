@@ -3,7 +3,6 @@ package packet
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
@@ -32,7 +31,6 @@ type Server struct {
 	pipeline        *Pipeline
 	ctx             context.Context
 	cancel          context.CancelFunc
-	wg              *sync.WaitGroup
 }
 
 func (s *Server) Name() string {
@@ -73,8 +71,8 @@ local_addresses: []
 
 # Ports to filter packets on (default: empty, captures all)
 # Use YAML array syntax:
-# ports: [5060, 8080]
-ports: []
+# ports: [5060, 8021]
+ports: [5060, 8021]
 `
 }
 
@@ -110,6 +108,9 @@ func (s *Server) Prepare() error {
 		s.Interface = "any"
 	}
 
+	// Create context and wait group for pipeline lifecycle management
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+
 	log.Logger.WithField("server", s.Name()).Info("packet server prepared successfully")
 	return nil
 }
@@ -124,18 +125,14 @@ func (s *Server) Start() error {
 	s.pipeline = pipeline
 
 	// Prepare the pipeline
-	if err := s.pipeline.Prepare(); err != nil {
+	if err := s.pipeline.Prepare(s.ctx); err != nil {
 		return fmt.Errorf("failed to prepare pipeline: %v", err)
 	}
 
 	log.Logger.WithField("server", s.Name()).Info("packet server is starting...")
 
-	// Create context and wait group for pipeline lifecycle management
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.wg = &sync.WaitGroup{}
-
 	// Start the pipeline
-	if err := s.pipeline.Start(s.ctx, s.wg); err != nil {
+	if err := s.pipeline.Start(); err != nil {
 		return fmt.Errorf("failed to start pipeline: %v", err)
 	}
 
@@ -149,11 +146,6 @@ func (s *Server) Close() error {
 	// Cancel context to signal pipeline to stop
 	if s.cancel != nil {
 		s.cancel()
-	}
-
-	// Wait for pipeline to finish
-	if s.wg != nil {
-		s.wg.Wait()
 	}
 
 	// Close the pipeline
