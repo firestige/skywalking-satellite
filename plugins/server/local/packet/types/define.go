@@ -53,7 +53,7 @@ type PacketInfo struct {
 
 type DataSource interface {
 	Lifecycle
-	Fetch(ctx context.Context) (*RawFrameData, error)
+	Fetch() (*RawFrameData, error)
 }
 
 type PacketStream interface {

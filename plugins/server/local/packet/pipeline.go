@@ -24,6 +24,7 @@ func (p *Pipeline) Prepare(ctx context.Context) error {
 	p.ctx = ctx
 	p.wg = &sync.WaitGroup{}
 
+	log.Logger.WithField("pipeline", Name).Debug("Preparing pipeline...")
 	// 准备数据源
 	if err := p.source.Prepare(ctx); err != nil {
 		return err
@@ -60,7 +61,7 @@ func (p *Pipeline) run() {
 			log.Logger.Info("Pipeline context done, stopping...")
 			return
 		default:
-			frame, err := p.source.Fetch(p.ctx)
+			frame, err := p.source.Fetch()
 			if err != nil {
 				log.Logger.Error("Error fetching frame:", err)
 				continue

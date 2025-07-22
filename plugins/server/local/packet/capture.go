@@ -86,6 +86,9 @@ func newNetworkCapture(config *CaptureConfig) *networkCapture {
 
 	// 初始化TCP重整器
 	nc.tcpAssembler = NewTCPAssembler(config.WorkerCount, config.LocalAddresses)
+	nc.started = false
+	nc.closed = false
+	nc.mu = &sync.RWMutex{}
 
 	// 初始化对象池
 	nc.initPools()
@@ -112,6 +115,7 @@ func (nc *networkCapture) initPools() {
 
 // Prepare 准备抓包环境
 func (nc *networkCapture) Prepare(ctx context.Context) error {
+	log.Logger.WithField("capture", nc.config.Interface).Debug("Preparing network capture...")
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 
@@ -212,6 +216,7 @@ func (nc *networkCapture) captureLoop() {
 				return
 			}
 
+			log.Logger.Debugf("Captured packet: %s", packet)
 			if packet == nil {
 				continue
 			}
@@ -407,6 +412,7 @@ func (nc *networkCapture) frameWorker() {
 		case <-nc.ctx.Done():
 			return
 		case frame := <-tcpFrameChan:
+			log.Logger.WithField("capture", nc.config.Interface).WithField("frame", frame).Debugf("Processing TCP frame: %s", frame.Meta["protocol"])
 			// 转发TCP帧
 			select {
 			case nc.frameChan <- frame:
@@ -433,14 +439,15 @@ func (nc *networkCapture) determineDirection(srcIP, dstIP string) string {
 }
 
 // Fetch 获取处理后的帧数据
-func (nc *networkCapture) Fetch(ctx context.Context) (*types.RawFrameData, error) {
+func (nc *networkCapture) Fetch() (*types.RawFrameData, error) {
 	select {
-	case <-ctx.Done():
-		return types.EmptyRawFrameData, ctx.Err()
+	case <-nc.ctx.Done():
+		return types.EmptyRawFrameData, nc.ctx.Err()
 	case frame, ok := <-nc.frameChan:
 		if !ok {
 			return types.EmptyRawFrameData, fmt.Errorf("frame channel closed")
 		}
+		log.Logger.WithField("capture", nc.config.Interface).Debugf("Fetched frame: %s", frame.Meta["protocol"])
 		return frame, nil
 	}
 }

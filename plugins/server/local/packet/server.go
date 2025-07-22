@@ -124,6 +124,8 @@ func (s *Server) Start() error {
 	}
 	s.pipeline = pipeline
 
+	log.Logger.WithField("server", s.Name()).Info("packet server pipeline built successfully")
+
 	// Prepare the pipeline
 	if err := s.pipeline.Prepare(s.ctx); err != nil {
 		return fmt.Errorf("failed to prepare pipeline: %v", err)
