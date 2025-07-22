@@ -3,10 +3,12 @@ package packet
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
+	"github.com/sirupsen/logrus"
 )
 
 type Pipeline struct {
@@ -19,14 +21,10 @@ type Pipeline struct {
 	wg  *sync.WaitGroup
 }
 
-func (p *Pipeline) Prepare(ctx context.Context) error {
-	// 设置上下文和等待组
-	p.ctx = ctx
-	p.wg = &sync.WaitGroup{}
-
+func (p *Pipeline) Prepare() error {
 	log.Logger.WithField("pipeline", Name).Debug("Preparing pipeline...")
 	// 准备数据源
-	if err := p.source.Prepare(ctx); err != nil {
+	if err := p.source.Prepare(); err != nil {
 		return err
 	}
 
@@ -45,7 +43,10 @@ func (p *Pipeline) run() {
 	defer p.wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
-			log.Logger.Error("Pipeline panic recovered:", r)
+			log.Logger.WithFields(logrus.Fields{
+				"error": r,
+				"stack": string(debug.Stack()),
+			}).Error("Pipeline panic recovered")
 		}
 	}()
 
@@ -98,10 +99,11 @@ type PipelineBuilder struct {
 	source      types.DataSource
 	filterChain types.FrameFilterChain
 	dispatcher  types.FrameHandler
+	ctx         context.Context
 }
 
-func NewPipelineBuilder(dispatcher types.FrameHandler) *PipelineBuilder {
-	return &PipelineBuilder{dispatcher: dispatcher}
+func NewPipelineBuilder(dispatcher types.FrameHandler, ctx context.Context) *PipelineBuilder {
+	return &PipelineBuilder{dispatcher: dispatcher, ctx: ctx}
 }
 
 func (b *PipelineBuilder) WithSource(source types.DataSource) *PipelineBuilder {
@@ -132,5 +134,7 @@ func (b *PipelineBuilder) Build() (*Pipeline, error) {
 		source:      b.source,
 		filterChain: b.filterChain,
 		dispatcher:  b.dispatcher,
+		ctx:         b.ctx,
+		wg:          &sync.WaitGroup{},
 	}, nil
 }

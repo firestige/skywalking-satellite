@@ -39,7 +39,7 @@ type SessionManagerConfig struct {
 type sessionManager struct {
 	sessions           map[string]*Session               // 使用 CallID 作为键
 	onRemoveSessionFns map[string]func(session *Session) // 存储 CallID 到删除函数的映射
-	mu                 sync.RWMutex                      // 保护并发访问
+	mu                 *sync.RWMutex                     // 保护并发访问
 	config             SessionManagerConfig
 	cleanupTicker      *time.Ticker
 	stopCleanupChan    chan struct{}
@@ -56,15 +56,17 @@ func NewSessionManager(config SessionManagerConfig) SipSessionManager {
 	}
 
 	return &sessionManager{
-		sessions:        make(map[string]*Session),
+		sessions:           make(map[string]*Session),
+		onRemoveSessionFns: make(map[string]func(session *Session)),
+		mu:                 &sync.RWMutex{},
+		// 使用传入的配置
 		config:          config,
 		stopCleanupChan: make(chan struct{}),
+		cleanupTicker:   nil, // 初始化为 nil，稍后在 Prepare 中启动
 	}
 }
 
 func (sm *sessionManager) Prepare() error {
-	// 初始化会话管理器
-	sm.sessions = make(map[string]*Session)
 
 	// 启动自动清理 goroutine
 	sm.startAutoCleanup()
@@ -182,8 +184,10 @@ func extractCSeqMethod(cseq string) (string, error) {
 func (sm *sessionManager) GetOrCreateSession(msg SipMessage) (*Session, error) {
 	switch m := msg.(type) {
 	case SipRequest:
+		log.Logger.Infof("Processing SIP request: %s", m.Method())
 		return sm.createSession(m)
 	case SipResponse:
+		log.Logger.Infof("Processing SIP response for CallID: %s", m.CallId())
 		return sm.getSession(m)
 	default:
 		return nil, fmt.Errorf("unsupported SIP message type: %T", msg)

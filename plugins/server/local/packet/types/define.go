@@ -1,7 +1,6 @@
 package types
 
 import (
-	"context"
 	"time"
 
 	"github.com/google/gopacket"
@@ -14,12 +13,6 @@ const (
 	SIP = "SIP"
 	ESL = "ESL"
 )
-
-type Lifecycle interface {
-	Prepare(ctx context.Context) error
-	Start() error
-	Close() error
-}
 
 type RawFrameData struct {
 	Data       []byte
@@ -52,11 +45,10 @@ type PacketInfo struct {
 }
 
 type DataSource interface {
-	Lifecycle
+	Prepare() error
+	Start() error
+	Close() error
 	Fetch() (*RawFrameData, error)
-}
-
-type PacketStream interface {
 }
 
 type FrameFilter interface {

@@ -118,7 +118,7 @@ func (s *Server) Prepare() error {
 func (s *Server) Start() error {
 	log.Logger.WithField("server", s.Name()).Info("packet server is about to start...")
 	// Build pipeline with configuration
-	pipeline, err := s.buildPipeline()
+	pipeline, err := s.buildPipeline(s.ctx)
 	if err != nil {
 		return fmt.Errorf("failed to build pipeline: %v", err)
 	}
@@ -127,7 +127,7 @@ func (s *Server) Start() error {
 	log.Logger.WithField("server", s.Name()).Info("packet server pipeline built successfully")
 
 	// Prepare the pipeline
-	if err := s.pipeline.Prepare(s.ctx); err != nil {
+	if err := s.pipeline.Prepare(); err != nil {
 		return fmt.Errorf("failed to prepare pipeline: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func (s *Server) Close() error {
 }
 
 // buildPipeline creates and configures the pipeline based on server configuration
-func (s *Server) buildPipeline() (*Pipeline, error) {
+func (s *Server) buildPipeline(ctx context.Context) (*Pipeline, error) {
 	// Create data source with configuration
 	// Convert s.Ports from []int to []uint32
 	var portsUint32 []uint32
@@ -185,7 +185,7 @@ func (s *Server) buildPipeline() (*Pipeline, error) {
 		return nil, fmt.Errorf("failed to compile BPF filter: %v", err)
 	}
 
-	dataSource, err := NewNetworkCaptureBuilder().
+	dataSource, err := NewNetworkCaptureBuilder(s.ctx).
 		WithInterface(s.Interface).
 		WithBPFFilter(bpfFilter).
 		WithRingSize(s.RingSize).
@@ -210,7 +210,7 @@ func (s *Server) buildPipeline() (*Pipeline, error) {
 	}
 
 	// Build pipeline using builder pattern
-	pipeline, err := NewPipelineBuilder(dispatcher).
+	pipeline, err := NewPipelineBuilder(dispatcher, ctx).
 		WithSource(dataSource).
 		Build()
 

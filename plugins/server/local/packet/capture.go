@@ -71,24 +71,22 @@ type networkCapture struct {
 
 	// 状态
 	started bool
-	closed  bool
 	mu      *sync.RWMutex
 }
 
 // newNetworkCapture 创建网络抓包实例
-func newNetworkCapture(config *CaptureConfig) *networkCapture {
+func newNetworkCapture(config *CaptureConfig, ctx context.Context) *networkCapture {
 	nc := &networkCapture{
-		config:     config,
-		ringBuffer: utils.NewRingBuffer(config.RingSize),
-		packetChan: make(chan *types.PacketInfo, config.RingSize),
-		frameChan:  make(chan *types.RawFrameData, config.RingSize),
+		config:       config,
+		ringBuffer:   utils.NewRingBuffer(config.RingSize),
+		packetChan:   make(chan *types.PacketInfo, config.RingSize),
+		frameChan:    make(chan *types.RawFrameData, config.RingSize),
+		mu:           &sync.RWMutex{},
+		ctx:          ctx,
+		wg:           &sync.WaitGroup{},
+		started:      false,
+		tcpAssembler: NewTCPAssembler(config.WorkerCount, config.LocalAddresses),
 	}
-
-	// 初始化TCP重整器
-	nc.tcpAssembler = NewTCPAssembler(config.WorkerCount, config.LocalAddresses)
-	nc.started = false
-	nc.closed = false
-	nc.mu = &sync.RWMutex{}
 
 	// 初始化对象池
 	nc.initPools()
@@ -114,7 +112,7 @@ func (nc *networkCapture) initPools() {
 }
 
 // Prepare 准备抓包环境
-func (nc *networkCapture) Prepare(ctx context.Context) error {
+func (nc *networkCapture) Prepare() error {
 	log.Logger.WithField("capture", nc.config.Interface).Debug("Preparing network capture...")
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
@@ -122,9 +120,6 @@ func (nc *networkCapture) Prepare(ctx context.Context) error {
 	if nc.started {
 		return fmt.Errorf("capture already started")
 	}
-
-	nc.ctx = ctx
-	nc.wg = &sync.WaitGroup{}
 
 	log.Logger.Infof("Preparing network capture on interface: %s", nc.config.Interface)
 
@@ -457,10 +452,6 @@ func (nc *networkCapture) Close() error {
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 
-	if nc.closed {
-		return nil
-	}
-
 	log.Logger.Info("Closing network capture...")
 
 	// 等待所有协程结束
@@ -481,7 +472,6 @@ func (nc *networkCapture) Close() error {
 	close(nc.packetChan)
 	close(nc.frameChan)
 
-	nc.closed = true
 	nc.started = false
 
 	log.Logger.Info("Network capture closed successfully")
@@ -491,12 +481,14 @@ func (nc *networkCapture) Close() error {
 // NetworkCaptureBuilder 构建器
 type NetworkCaptureBuilder struct {
 	config *CaptureConfig
+	ctx    context.Context
 }
 
 // NewNetworkCaptureBuilder 创建构建器
-func NewNetworkCaptureBuilder() *NetworkCaptureBuilder {
+func NewNetworkCaptureBuilder(ctx context.Context) *NetworkCaptureBuilder {
 	return &NetworkCaptureBuilder{
 		config: DefaultCaptureConfig(),
+		ctx:    ctx,
 	}
 }
 
@@ -564,5 +556,5 @@ func (b *NetworkCaptureBuilder) Build() (types.DataSource, error) {
 		b.config.LocalAddresses = GetLocalAddresses()
 	}
 
-	return newNetworkCapture(b.config), nil
+	return newNetworkCapture(b.config, b.ctx), nil
 }

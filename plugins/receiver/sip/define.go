@@ -43,3 +43,10 @@ type Session struct {
 	LastModified time.Time    // 会话最后修改时间
 	mu           sync.RWMutex // 保护并发访问
 }
+
+func (s *Session) String() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return "CallId: " + s.CallId + ", CSeq: " + s.CurrentCseq + ", CurrentSpan: " + string(s.CurrentSpan) +
+		", LastModified: " + s.LastModified.String() + ", Segment: " + s.Segment.String()
+}
