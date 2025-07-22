@@ -53,21 +53,12 @@ type networkCapture struct {
 	// AF_PACKET句柄
 	handle *afpacket.TPacket
 
-	// 数据处理组件
-	ringBuffer   *utils.RingBuffer
-	tcpAssembler *TCPAssembler
-
 	// 工作协程管理
 	ctx context.Context
 	wg  *sync.WaitGroup
 
 	// 数据通道
-	packetChan chan *types.PacketInfo
-	frameChan  chan *types.RawFrameData
-
-	// 对象池
-	packetPool *sync.Pool
-	bufferPool *sync.Pool
+	frameChan chan *types.RawFrameData
 
 	// 状态
 	started bool
@@ -78,39 +69,15 @@ type networkCapture struct {
 // newNetworkCapture 创建网络抓包实例
 func newNetworkCapture(config *CaptureConfig) *networkCapture {
 	nc := &networkCapture{
-		config:     config,
-		ringBuffer: utils.NewRingBuffer(config.RingSize),
-		packetChan: make(chan *types.PacketInfo, config.RingSize),
-		frameChan:  make(chan *types.RawFrameData, config.RingSize),
+		config:    config,
+		frameChan: make(chan *types.RawFrameData),
+		mu:        &sync.RWMutex{},
+		started:   false,
+		closed:    false,
+		wg:        &sync.WaitGroup{},
 	}
-
-	// 初始化TCP重整器
-	nc.tcpAssembler = NewTCPAssembler(config.WorkerCount, config.LocalAddresses)
-	nc.started = false
-	nc.closed = false
-	nc.mu = &sync.RWMutex{}
-
-	// 初始化对象池
-	nc.initPools()
 
 	return nc
-}
-
-// initPools 初始化对象池
-func (nc *networkCapture) initPools() {
-	nc.packetPool = &sync.Pool{
-		New: func() interface{} {
-			return &types.PacketInfo{
-				Payload: make([]byte, 0, nc.config.MTU),
-			}
-		},
-	}
-
-	nc.bufferPool = &sync.Pool{
-		New: func() interface{} {
-			return make([]byte, 0, nc.config.MTU)
-		},
-	}
 }
 
 // Prepare 准备抓包环境
@@ -124,7 +91,6 @@ func (nc *networkCapture) Prepare(ctx context.Context) error {
 	}
 
 	nc.ctx = ctx
-	nc.wg = &sync.WaitGroup{}
 
 	log.Logger.Infof("Preparing network capture on interface: %s", nc.config.Interface)
 
@@ -176,19 +142,6 @@ func (nc *networkCapture) Start() error {
 
 	log.Logger.Info("Starting network capture...")
 
-	// 启动TCP重整器
-	nc.tcpAssembler.Start(nc.ctx)
-
-	// 启动工作协程
-	for i := 0; i < nc.config.WorkerCount; i++ {
-		nc.wg.Add(1)
-		go nc.packetWorker()
-	}
-
-	// 启动帧处理协程
-	nc.wg.Add(1)
-	go nc.frameWorker()
-
 	// 启动主抓包协程
 	nc.wg.Add(1)
 	go nc.captureLoop()
@@ -222,23 +175,15 @@ func (nc *networkCapture) captureLoop() {
 			}
 
 			// 从对象池获取PacketInfo
-			packetInfo := nc.packetPool.Get().(*types.PacketInfo)
+			packetInfo := &types.PacketInfo{}
 			packetInfo.Timestamp = packet.Metadata().Timestamp
 			packetInfo.Packet = packet
 
 			// 解析并缓存各层信息
 			nc.parsePacketLayers(packetInfo)
 
-			// 发送到处理队列
-			select {
-			case nc.packetChan <- packetInfo:
-			case <-nc.ctx.Done():
-				nc.packetPool.Put(packetInfo)
-				return
-			default:
-				// 队列满，丢弃包
-				nc.packetPool.Put(packetInfo)
-			}
+			nc.processUDPPacket(packetInfo)
+
 		}
 	}
 }
@@ -261,88 +206,17 @@ func (nc *networkCapture) parsePacketLayers(packetInfo *types.PacketInfo) {
 		}
 	}
 
-	// 解析TCP层
-	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-		if tcp, ok := tcpLayer.(*layers.TCP); ok {
-			packetInfo.TCPLayer = tcp
-			// 获取TCP载荷
-			payload := tcp.Payload
-			if len(payload) > 0 {
-				packetInfo.Payload = packetInfo.Payload[:len(payload)]
-				copy(packetInfo.Payload, payload)
-			}
-		}
-	}
-
 	// 解析UDP层（如果需要）
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		if udp, ok := udpLayer.(*layers.UDP); ok {
 			// 获取UDP载荷
 			payload := udp.Payload
 			if len(payload) > 0 {
-				packetInfo.Payload = packetInfo.Payload[:len(payload)]
+				packetInfo.Payload = make([]byte, len(payload))
 				copy(packetInfo.Payload, payload)
 			}
 		}
 	}
-}
-
-// packetWorker 包处理工作协程
-func (nc *networkCapture) packetWorker() {
-	defer nc.wg.Done()
-
-	for {
-		select {
-		case <-nc.ctx.Done():
-			return
-		case packetInfo, ok := <-nc.packetChan:
-			if !ok {
-				return
-			}
-
-			nc.processPacket(packetInfo)
-
-			// 归还到对象池
-			nc.resetPacketInfo(packetInfo)
-			nc.packetPool.Put(packetInfo)
-		}
-	}
-}
-
-// resetPacketInfo 重置PacketInfo到初始状态
-func (nc *networkCapture) resetPacketInfo(packetInfo *types.PacketInfo) {
-	packetInfo.Packet = nil
-	packetInfo.EthLayer = nil
-	packetInfo.IPLayer = nil
-	packetInfo.TCPLayer = nil
-	packetInfo.Payload = packetInfo.Payload[:0]
-}
-
-// processPacket 处理单个数据包
-func (nc *networkCapture) processPacket(packetInfo *types.PacketInfo) {
-	// 检查是否有IPv4层
-	if packetInfo.IPLayer == nil {
-		return
-	}
-
-	ip := packetInfo.IPLayer
-
-	switch ip.Protocol {
-	case layers.IPProtocolTCP:
-		nc.processTCPPacket(packetInfo)
-	case layers.IPProtocolUDP:
-		nc.processUDPPacket(packetInfo)
-	}
-}
-
-// processTCPPacket 处理TCP数据包
-func (nc *networkCapture) processTCPPacket(packetInfo *types.PacketInfo) {
-	if packetInfo.TCPLayer == nil {
-		return
-	}
-
-	// 发送到TCP重整器
-	nc.tcpAssembler.ProcessPacket(packetInfo)
 }
 
 // processUDPPacket 处理UDP数据包
@@ -400,31 +274,6 @@ func (nc *networkCapture) processUDPPacket(packetInfo *types.PacketInfo) {
 	}
 }
 
-// frameWorker 帧处理工作协程
-func (nc *networkCapture) frameWorker() {
-	defer nc.wg.Done()
-
-	// 获取TCP重整器的输出通道
-	tcpFrameChan := nc.tcpAssembler.GetFrameChannel()
-
-	for {
-		select {
-		case <-nc.ctx.Done():
-			return
-		case frame := <-tcpFrameChan:
-			log.Logger.WithField("capture", nc.config.Interface).WithField("frame", frame).Debugf("Processing TCP frame: %s", frame.Meta["protocol"])
-			// 转发TCP帧
-			select {
-			case nc.frameChan <- frame:
-			case <-nc.ctx.Done():
-				return
-			default:
-				// 通道满，丢弃帧
-			}
-		}
-	}
-}
-
 // determineDirection 判断数据方向
 func (nc *networkCapture) determineDirection(srcIP, dstIP string) string {
 	for _, localAddr := range nc.config.LocalAddresses {
@@ -442,10 +291,10 @@ func (nc *networkCapture) determineDirection(srcIP, dstIP string) string {
 func (nc *networkCapture) Fetch() (*types.RawFrameData, error) {
 	select {
 	case <-nc.ctx.Done():
-		return types.EmptyRawFrameData, nc.ctx.Err()
+		return nil, nil
 	case frame, ok := <-nc.frameChan:
 		if !ok {
-			return types.EmptyRawFrameData, fmt.Errorf("frame channel closed")
+			return nil, fmt.Errorf("frame channel closed")
 		}
 		log.Logger.WithField("capture", nc.config.Interface).Debugf("Fetched frame: %s", frame.Meta["protocol"])
 		return frame, nil
@@ -466,11 +315,6 @@ func (nc *networkCapture) Close() error {
 	// 等待所有协程结束
 	nc.wg.Wait()
 
-	// 停止TCP重整器
-	if nc.tcpAssembler != nil {
-		nc.tcpAssembler.Stop()
-	}
-
 	// 关闭AF_PACKET句柄
 	if nc.handle != nil {
 		nc.handle.Close()
@@ -478,7 +322,6 @@ func (nc *networkCapture) Close() error {
 	}
 
 	// 关闭通道
-	close(nc.packetChan)
 	close(nc.frameChan)
 
 	nc.closed = true

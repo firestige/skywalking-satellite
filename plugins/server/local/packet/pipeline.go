@@ -67,7 +67,7 @@ func (p *Pipeline) run() {
 				continue
 			}
 
-			if frame == types.EmptyRawFrameData {
+			if frame == nil {
 				continue
 			}
 
