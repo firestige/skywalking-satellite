@@ -112,13 +112,18 @@ func (nc *networkCapture) initPools() {
 }
 
 // Prepare 准备抓包环境
-func (nc *networkCapture) Prepare() error {
+func (nc *networkCapture) Prepare(ctx context.Context) error {
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 
 	if nc.started {
 		return fmt.Errorf("capture already started")
 	}
+
+	nc.ctx, nc.cancel = context.WithCancel(ctx)
+	nc.closed = false
+	nc.started = false
+	nc.wg = sync.WaitGroup{}
 
 	log.Logger.Infof("Preparing network capture on interface: %s", nc.config.Interface)
 
@@ -154,7 +159,7 @@ func (nc *networkCapture) Prepare() error {
 }
 
 // Start 启动抓包
-func (nc *networkCapture) Start(ctx context.Context, wg *sync.WaitGroup) error {
+func (nc *networkCapture) Start() error {
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 
@@ -166,7 +171,6 @@ func (nc *networkCapture) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		return fmt.Errorf("capture not prepared")
 	}
 
-	nc.ctx, nc.cancel = context.WithCancel(ctx)
 	nc.started = true
 
 	log.Logger.Info("Starting network capture...")
@@ -187,11 +191,6 @@ func (nc *networkCapture) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	// 启动主抓包协程
 	nc.wg.Add(1)
 	go nc.captureLoop()
-
-	// 等待启动完成
-	if wg != nil {
-		wg.Done()
-	}
 
 	log.Logger.Info("Network capture started successfully")
 	return nil
@@ -567,4 +566,9 @@ func (b *NetworkCaptureBuilder) Build() (types.DataSource, error) {
 	}
 
 	return newNetworkCapture(b.config), nil
+}
+
+func (b *NetworkCaptureBuilder) String() string {
+	return fmt.Sprintf("NetworkCaptureBuilder{Interface: %s, RingSize: %d, WorkerCount: %d, MTU: %d, LocalAddresses: %v}",
+		b.config.Interface, b.config.RingSize, b.config.WorkerCount, b.config.MTU, b.config.LocalAddresses)
 }

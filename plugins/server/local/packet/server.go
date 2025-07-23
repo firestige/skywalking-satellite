@@ -74,7 +74,7 @@ local_addresses: []
 # Ports to filter packets on (default: empty, captures all)
 # Use YAML array syntax:
 # ports: [5060, 8080]
-ports: []
+ports: [5060, 8021]
 `
 }
 
@@ -123,19 +123,18 @@ func (s *Server) Start() error {
 	}
 	s.pipeline = pipeline
 
+	// Create context and wait group for pipeline lifecycle management
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+
 	// Prepare the pipeline
-	if err := s.pipeline.Prepare(); err != nil {
+	if err := s.pipeline.Prepare(s.ctx); err != nil {
 		return fmt.Errorf("failed to prepare pipeline: %v", err)
 	}
 
 	log.Logger.WithField("server", s.Name()).Info("packet server is starting...")
 
-	// Create context and wait group for pipeline lifecycle management
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.wg = &sync.WaitGroup{}
-
 	// Start the pipeline
-	if err := s.pipeline.Start(s.ctx, s.wg); err != nil {
+	if err := s.pipeline.Start(); err != nil {
 		return fmt.Errorf("failed to start pipeline: %v", err)
 	}
 
@@ -191,14 +190,17 @@ func (s *Server) buildPipeline() (*Pipeline, error) {
 		return nil, fmt.Errorf("failed to compile BPF filter: %v", err)
 	}
 
-	dataSource, err := NewNetworkCaptureBuilder().
+	ncBuilder := NewNetworkCaptureBuilder().
 		WithInterface(s.Interface).
 		WithBPFFilter(bpfFilter).
 		WithRingSize(s.RingSize).
 		WithWorkerCount(s.WorkerCount).
 		WithMTU(s.MTU).
-		WithLocalAddresses(s.LocalAddresses).
-		Build()
+		WithLocalAddresses(s.LocalAddresses)
+	log.Logger.WithField("server", s.Name()).Infof("create capture with config: %s, ports: %v", ncBuilder.String(), s.Ports)
+
+	dataSource, err := ncBuilder.Build()
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create data source: %v", err)
 	}

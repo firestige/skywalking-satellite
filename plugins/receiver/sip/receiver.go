@@ -2,6 +2,7 @@ package sip
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
@@ -247,11 +248,12 @@ func (r *Receiver) buildSegment(source *types.RawFrameData, sipMessage SipMessag
 }
 
 func buildLogData(source *types.RawFrameData, message SipMessage, session *Session) *logging.LogData {
+	segment := session.Segment
 	return &logging.LogData{
-		Service:         "SIP Service",
-		ServiceInstance: "SIP Instance",
+		Service:         segment.Service,
+		ServiceInstance: segment.ServiceInstance,
 		Timestamp:       source.Timestamp,
-		Endpoint:        "SIP Endpoint",
+		Endpoint:        getEndpoint(message),
 		Body: &logging.LogDataBody{
 			Type: "LogDataBodyType_TEXT",
 			Content: &logging.LogDataBody_Text{
@@ -277,6 +279,56 @@ func buildLogData(source *types.RawFrameData, message SipMessage, session *Sessi
 			TraceSegmentId: session.Segment.TraceSegmentId,
 			SpanId:         session.CurrentSpan,
 		},
+	}
+}
+
+func getEndpoint(message SipMessage) string {
+	cseq := message.CSeq()
+	if cseq == "" {
+		return "/UNKNOWN"
+	}
+
+	// 从CSeq中提取method
+	// CSeq格式通常是 "序列号 方法名"，例如 "1 INVITE" 或 "2 BYE"
+	parts := strings.Fields(cseq)
+	if len(parts) < 2 {
+		return "/UNKNOWN"
+	}
+
+	method := strings.ToUpper(parts[1])
+
+	// 定义会话初始消息和会话外消息
+	sessionInitMethods := map[string]bool{
+		"INVITE":    true,
+		"REGISTER":  true,
+		"OPTIONS":   true,
+		"MESSAGE":   true,
+		"PUBLISH":   true,
+		"SUBSCRIBE": true,
+		"NOTIFY":    true,
+	}
+
+	// 定义会话内消息及其对应的初始方法
+	sessionInternalMethods := map[string]string{
+		"ACK":    "INVITE",
+		"BYE":    "INVITE",
+		"CANCEL": "INVITE",
+		"PRACK":  "INVITE",
+		"UPDATE": "INVITE",
+		"REFER":  "INVITE",
+		"INFO":   "INVITE",
+	}
+
+	// 判断消息类型并返回endpoint
+	if sessionInitMethods[method] {
+		// 会话初始消息和会话外消息，endpoint为/{会话方法名}
+		return "/" + method
+	} else if initialMethod, exists := sessionInternalMethods[method]; exists {
+		// 会话内消息，统一为对应会话的初始消息
+		return "/" + initialMethod
+	} else {
+		// 未知方法，直接返回方法名
+		return "/" + method
 	}
 }
 

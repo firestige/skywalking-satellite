@@ -2,7 +2,6 @@ package packet
 
 import (
 	"context"
-	"sync"
 
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 )
@@ -52,14 +51,14 @@ func (f *frameFilterChain) Filter(frame *types.RawFrameData) {
 	}
 }
 
-func (f *frameFilterChain) Prepare() error {
+func (f *frameFilterChain) Prepare(ctx context.Context) error {
 	for _, filter := range f.filters {
-		if err := filter.Prepare(); err != nil {
+		if err := filter.Prepare(ctx); err != nil {
 			return err
 		}
 	}
 	if f.handler != nil {
-		if err := f.handler.Prepare(); err != nil {
+		if err := f.handler.Prepare(ctx); err != nil {
 			return err
 		}
 	}
@@ -80,6 +79,6 @@ func (f *frameFilterChain) Close() error {
 	return nil
 }
 
-func (f *frameFilterChain) Start(ctx context.Context, wg *sync.WaitGroup) error {
+func (f *frameFilterChain) Start() error {
 	return nil
 }

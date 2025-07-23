@@ -20,31 +20,31 @@ type Pipeline struct {
 	wg     *sync.WaitGroup
 }
 
-func (p *Pipeline) Prepare() error {
+func (p *Pipeline) Prepare(ctx context.Context) error {
+	// 设置上下文和等待组
+	p.ctx, p.cancel = context.WithCancel(ctx)
+	p.wg = &sync.WaitGroup{}
 	// 准备数据源
-	if err := p.source.Prepare(); err != nil {
+	if err := p.source.Prepare(ctx); err != nil {
 		return err
 	}
 
 	// 准备过滤链
-	if err := p.filterChain.Prepare(); err != nil {
+	if err := p.filterChain.Prepare(ctx); err != nil {
 		return err
 	}
 
 	// 准备分发器
-	if err := p.dispatcher.Prepare(); err != nil {
+	if err := p.dispatcher.Prepare(ctx); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (p *Pipeline) Start(ctx context.Context, wg *sync.WaitGroup) error {
-	// 设置上下文和等待组
-	p.ctx, p.cancel = context.WithCancel(ctx)
-	p.wg = wg
+func (p *Pipeline) Start() error {
 
-	// 异步启动流水线处理
+	log.Logger.Info("Starting pipeline...")
 	p.wg.Add(1)
 	go p.run()
 
@@ -52,15 +52,15 @@ func (p *Pipeline) Start(ctx context.Context, wg *sync.WaitGroup) error {
 }
 
 func (p *Pipeline) run() {
-	defer p.wg.Done()
 	defer func() {
+		p.wg.Done()
 		if r := recover(); r != nil {
 			log.Logger.Error("Pipeline panic recovered:", r)
 		}
 	}()
 
 	log.Logger.Info("Pipeline started")
-	if err := p.source.Start(p.ctx, p.wg); err != nil {
+	if err := p.source.Start(); err != nil {
 		log.Logger.Error("Error starting source:", err)
 		return
 	}
@@ -71,7 +71,10 @@ func (p *Pipeline) run() {
 			log.Logger.Info("Pipeline context done, stopping...")
 			return
 		default:
+			log.Logger.Info("Fetching frame from source...")
+			// 从数据源获取frame
 			frame, err := p.source.Fetch(p.ctx)
+			log.Logger.WithField("frame", frame).Debug("Fetched frame")
 			if err != nil {
 				log.Logger.Error("Error fetching frame:", err)
 				continue
@@ -93,6 +96,10 @@ func (p *Pipeline) Close() error {
 	// 取消上下文
 	if p.cancel != nil {
 		p.cancel()
+	}
+	// 等待所有协程结束
+	if p.wg != nil {
+		p.wg.Wait()
 	}
 
 	// 关闭数据源
