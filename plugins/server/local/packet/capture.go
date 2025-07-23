@@ -58,35 +58,35 @@ type networkCapture struct {
 	tcpAssembler *TCPAssembler
 
 	// 工作协程管理
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx context.Context
+	wg  *sync.WaitGroup
 
 	// 数据通道
 	packetChan chan *types.PacketInfo
 	frameChan  chan *types.RawFrameData
 
 	// 对象池
-	packetPool sync.Pool
-	bufferPool sync.Pool
+	packetPool *sync.Pool
+	bufferPool *sync.Pool
 
 	// 状态
 	started bool
-	closed  bool
-	mu      sync.RWMutex
+	mu      *sync.RWMutex
 }
 
 // newNetworkCapture 创建网络抓包实例
-func newNetworkCapture(config *CaptureConfig) *networkCapture {
+func newNetworkCapture(config *CaptureConfig, ctx context.Context) *networkCapture {
 	nc := &networkCapture{
-		config:     config,
-		ringBuffer: utils.NewRingBuffer(config.RingSize),
-		packetChan: make(chan *types.PacketInfo, config.RingSize),
-		frameChan:  make(chan *types.RawFrameData, config.RingSize),
+		config:       config,
+		ringBuffer:   utils.NewRingBuffer(config.RingSize),
+		packetChan:   make(chan *types.PacketInfo, config.RingSize),
+		frameChan:    make(chan *types.RawFrameData, config.RingSize),
+		mu:           &sync.RWMutex{},
+		ctx:          ctx,
+		wg:           &sync.WaitGroup{},
+		started:      false,
+		tcpAssembler: NewTCPAssembler(config.WorkerCount, config.LocalAddresses),
 	}
-
-	// 初始化TCP重整器
-	nc.tcpAssembler = NewTCPAssembler(config.WorkerCount, config.LocalAddresses)
 
 	// 初始化对象池
 	nc.initPools()
@@ -96,7 +96,7 @@ func newNetworkCapture(config *CaptureConfig) *networkCapture {
 
 // initPools 初始化对象池
 func (nc *networkCapture) initPools() {
-	nc.packetPool = sync.Pool{
+	nc.packetPool = &sync.Pool{
 		New: func() interface{} {
 			return &types.PacketInfo{
 				Payload: make([]byte, 0, nc.config.MTU),
@@ -104,7 +104,7 @@ func (nc *networkCapture) initPools() {
 		},
 	}
 
-	nc.bufferPool = sync.Pool{
+	nc.bufferPool = &sync.Pool{
 		New: func() interface{} {
 			return make([]byte, 0, nc.config.MTU)
 		},
@@ -112,18 +112,14 @@ func (nc *networkCapture) initPools() {
 }
 
 // Prepare 准备抓包环境
-func (nc *networkCapture) Prepare(ctx context.Context) error {
+func (nc *networkCapture) Prepare() error {
+	log.Logger.WithField("capture", nc.config.Interface).Debug("Preparing network capture...")
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 
 	if nc.started {
 		return fmt.Errorf("capture already started")
 	}
-
-	nc.ctx, nc.cancel = context.WithCancel(ctx)
-	nc.closed = false
-	nc.started = false
-	nc.wg = sync.WaitGroup{}
 
 	log.Logger.Infof("Preparing network capture on interface: %s", nc.config.Interface)
 
@@ -215,6 +211,7 @@ func (nc *networkCapture) captureLoop() {
 				return
 			}
 
+			log.Logger.Debugf("Captured packet: %s", packet)
 			if packet == nil {
 				continue
 			}
@@ -410,6 +407,7 @@ func (nc *networkCapture) frameWorker() {
 		case <-nc.ctx.Done():
 			return
 		case frame := <-tcpFrameChan:
+			log.Logger.WithField("capture", nc.config.Interface).WithField("frame", frame).Debugf("Processing TCP frame: %s", frame.Meta["protocol"])
 			// 转发TCP帧
 			select {
 			case nc.frameChan <- frame:
@@ -436,14 +434,15 @@ func (nc *networkCapture) determineDirection(srcIP, dstIP string) string {
 }
 
 // Fetch 获取处理后的帧数据
-func (nc *networkCapture) Fetch(ctx context.Context) (*types.RawFrameData, error) {
+func (nc *networkCapture) Fetch() (*types.RawFrameData, error) {
 	select {
-	case <-ctx.Done():
-		return types.EmptyRawFrameData, ctx.Err()
+	case <-nc.ctx.Done():
+		return types.EmptyRawFrameData, nc.ctx.Err()
 	case frame, ok := <-nc.frameChan:
 		if !ok {
 			return types.EmptyRawFrameData, fmt.Errorf("frame channel closed")
 		}
+		log.Logger.WithField("capture", nc.config.Interface).Debugf("Fetched frame: %s", frame.Meta["protocol"])
 		return frame, nil
 	}
 }
@@ -453,16 +452,7 @@ func (nc *networkCapture) Close() error {
 	nc.mu.Lock()
 	defer nc.mu.Unlock()
 
-	if nc.closed {
-		return nil
-	}
-
 	log.Logger.Info("Closing network capture...")
-
-	// 取消上下文
-	if nc.cancel != nil {
-		nc.cancel()
-	}
 
 	// 等待所有协程结束
 	nc.wg.Wait()
@@ -482,7 +472,6 @@ func (nc *networkCapture) Close() error {
 	close(nc.packetChan)
 	close(nc.frameChan)
 
-	nc.closed = true
 	nc.started = false
 
 	log.Logger.Info("Network capture closed successfully")
@@ -492,12 +481,14 @@ func (nc *networkCapture) Close() error {
 // NetworkCaptureBuilder 构建器
 type NetworkCaptureBuilder struct {
 	config *CaptureConfig
+	ctx    context.Context
 }
 
 // NewNetworkCaptureBuilder 创建构建器
-func NewNetworkCaptureBuilder() *NetworkCaptureBuilder {
+func NewNetworkCaptureBuilder(ctx context.Context) *NetworkCaptureBuilder {
 	return &NetworkCaptureBuilder{
 		config: DefaultCaptureConfig(),
+		ctx:    ctx,
 	}
 }
 
@@ -565,7 +556,7 @@ func (b *NetworkCaptureBuilder) Build() (types.DataSource, error) {
 		b.config.LocalAddresses = GetLocalAddresses()
 	}
 
-	return newNetworkCapture(b.config), nil
+	return newNetworkCapture(b.config, b.ctx), nil
 }
 
 func (b *NetworkCaptureBuilder) String() string {

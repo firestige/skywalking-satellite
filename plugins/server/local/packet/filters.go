@@ -1,8 +1,6 @@
 package packet
 
 import (
-	"context"
-
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 )
 
@@ -49,36 +47,4 @@ func (f *frameFilterChain) Filter(frame *types.RawFrameData) {
 	} else {
 		f.handler.Handle(frame)
 	}
-}
-
-func (f *frameFilterChain) Prepare(ctx context.Context) error {
-	for _, filter := range f.filters {
-		if err := filter.Prepare(ctx); err != nil {
-			return err
-		}
-	}
-	if f.handler != nil {
-		if err := f.handler.Prepare(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (f *frameFilterChain) Close() error {
-	for _, filter := range f.filters {
-		if err := filter.Close(); err != nil {
-			return err
-		}
-	}
-	if f.handler != nil {
-		if err := f.handler.Close(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (f *frameFilterChain) Start() error {
-	return nil
 }

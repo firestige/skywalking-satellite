@@ -85,6 +85,11 @@ func (r *Receiver) packetHandler(data *types.RawFrameData) error {
 
 	session, err := r.sessionManager.GetOrCreateSession(sipMessage)
 
+	if err != nil {
+		log.Logger.Error("failed to get or create session:", err)
+		return err
+	}
+
 	// 构建跟踪段
 	segment := r.buildSegment(data, sipMessage, session)
 	if segment == nil {

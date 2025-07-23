@@ -3,7 +3,6 @@ package packet
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
@@ -32,7 +31,6 @@ type Server struct {
 	pipeline        *Pipeline
 	ctx             context.Context
 	cancel          context.CancelFunc
-	wg              *sync.WaitGroup
 }
 
 func (s *Server) Name() string {
@@ -73,7 +71,7 @@ local_addresses: []
 
 # Ports to filter packets on (default: empty, captures all)
 # Use YAML array syntax:
-# ports: [5060, 8080]
+# ports: [5060, 8021]
 ports: [5060, 8021]
 `
 }
@@ -110,6 +108,9 @@ func (s *Server) Prepare() error {
 		s.Interface = "any"
 	}
 
+	// Create context and wait group for pipeline lifecycle management
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+
 	log.Logger.WithField("server", s.Name()).Info("packet server prepared successfully")
 	return nil
 }
@@ -117,17 +118,16 @@ func (s *Server) Prepare() error {
 func (s *Server) Start() error {
 	log.Logger.WithField("server", s.Name()).Info("packet server is about to start...")
 	// Build pipeline with configuration
-	pipeline, err := s.buildPipeline()
+	pipeline, err := s.buildPipeline(s.ctx)
 	if err != nil {
 		return fmt.Errorf("failed to build pipeline: %v", err)
 	}
 	s.pipeline = pipeline
 
-	// Create context and wait group for pipeline lifecycle management
-	s.ctx, s.cancel = context.WithCancel(context.Background())
+	log.Logger.WithField("server", s.Name()).Info("packet server pipeline built successfully")
 
 	// Prepare the pipeline
-	if err := s.pipeline.Prepare(s.ctx); err != nil {
+	if err := s.pipeline.Prepare(); err != nil {
 		return fmt.Errorf("failed to prepare pipeline: %v", err)
 	}
 
@@ -150,11 +150,6 @@ func (s *Server) Close() error {
 		s.cancel()
 	}
 
-	// Wait for pipeline to finish
-	if s.wg != nil {
-		s.wg.Wait()
-	}
-
 	// Close the pipeline
 	if s.pipeline != nil {
 		if err := s.pipeline.Close(); err != nil {
@@ -168,7 +163,7 @@ func (s *Server) Close() error {
 }
 
 // buildPipeline creates and configures the pipeline based on server configuration
-func (s *Server) buildPipeline() (*Pipeline, error) {
+func (s *Server) buildPipeline(ctx context.Context) (*Pipeline, error) {
 	// Create data source with configuration
 	// Convert s.Ports from []int to []uint32
 	var portsUint32 []uint32
@@ -190,16 +185,14 @@ func (s *Server) buildPipeline() (*Pipeline, error) {
 		return nil, fmt.Errorf("failed to compile BPF filter: %v", err)
 	}
 
-	ncBuilder := NewNetworkCaptureBuilder().
+	dataSource, err := NewNetworkCaptureBuilder(s.ctx).
 		WithInterface(s.Interface).
 		WithBPFFilter(bpfFilter).
 		WithRingSize(s.RingSize).
 		WithWorkerCount(s.WorkerCount).
 		WithMTU(s.MTU).
-		WithLocalAddresses(s.LocalAddresses)
-	log.Logger.WithField("server", s.Name()).Infof("create capture with config: %s, ports: %v", ncBuilder.String(), s.Ports)
-
-	dataSource, err := ncBuilder.Build()
+		WithLocalAddresses(s.LocalAddresses).
+		Build()
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create data source: %v", err)
@@ -218,7 +211,7 @@ func (s *Server) buildPipeline() (*Pipeline, error) {
 	}
 
 	// Build pipeline using builder pattern
-	pipeline, err := NewPipelineBuilder(dispatcher).
+	pipeline, err := NewPipelineBuilder(dispatcher, ctx).
 		WithSource(dataSource).
 		Build()
 

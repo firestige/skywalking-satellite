@@ -3,10 +3,12 @@ package packet
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
+	"github.com/sirupsen/logrus"
 )
 
 type Pipeline struct {
@@ -15,27 +17,14 @@ type Pipeline struct {
 	dispatcher  types.FrameHandler
 
 	// 控制流
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     *sync.WaitGroup
+	ctx context.Context
+	wg  *sync.WaitGroup
 }
 
-func (p *Pipeline) Prepare(ctx context.Context) error {
-	// 设置上下文和等待组
-	p.ctx, p.cancel = context.WithCancel(ctx)
-	p.wg = &sync.WaitGroup{}
+func (p *Pipeline) Prepare() error {
+	log.Logger.WithField("pipeline", Name).Debug("Preparing pipeline...")
 	// 准备数据源
-	if err := p.source.Prepare(ctx); err != nil {
-		return err
-	}
-
-	// 准备过滤链
-	if err := p.filterChain.Prepare(ctx); err != nil {
-		return err
-	}
-
-	// 准备分发器
-	if err := p.dispatcher.Prepare(ctx); err != nil {
+	if err := p.source.Prepare(); err != nil {
 		return err
 	}
 
@@ -55,7 +44,10 @@ func (p *Pipeline) run() {
 	defer func() {
 		p.wg.Done()
 		if r := recover(); r != nil {
-			log.Logger.Error("Pipeline panic recovered:", r)
+			log.Logger.WithFields(logrus.Fields{
+				"error": r,
+				"stack": string(debug.Stack()),
+			}).Error("Pipeline panic recovered")
 		}
 	}()
 
@@ -71,10 +63,7 @@ func (p *Pipeline) run() {
 			log.Logger.Info("Pipeline context done, stopping...")
 			return
 		default:
-			log.Logger.Info("Fetching frame from source...")
-			// 从数据源获取frame
-			frame, err := p.source.Fetch(p.ctx)
-			log.Logger.WithField("frame", frame).Debug("Fetched frame")
+			frame, err := p.source.Fetch()
 			if err != nil {
 				log.Logger.Error("Error fetching frame:", err)
 				continue
@@ -93,11 +82,7 @@ func (p *Pipeline) run() {
 func (p *Pipeline) Close() error {
 	log.Logger.Info("Closing pipeline...")
 
-	// 取消上下文
-	if p.cancel != nil {
-		p.cancel()
-	}
-	// 等待所有协程结束
+	// 等待所有 goroutine 完成
 	if p.wg != nil {
 		p.wg.Wait()
 	}
@@ -105,16 +90,6 @@ func (p *Pipeline) Close() error {
 	// 关闭数据源
 	if err := p.source.Close(); err != nil {
 		log.Logger.Error("Error closing source:", err)
-	}
-
-	// 关闭过滤链
-	if err := p.filterChain.Close(); err != nil {
-		log.Logger.Error("Error closing filter chain:", err)
-	}
-
-	// 关闭分发器
-	if err := p.dispatcher.Close(); err != nil {
-		log.Logger.Error("Error closing dispatcher:", err)
 	}
 
 	log.Logger.Info("Pipeline closed")
@@ -125,10 +100,11 @@ type PipelineBuilder struct {
 	source      types.DataSource
 	filterChain types.FrameFilterChain
 	dispatcher  types.FrameHandler
+	ctx         context.Context
 }
 
-func NewPipelineBuilder(dispatcher types.FrameHandler) *PipelineBuilder {
-	return &PipelineBuilder{dispatcher: dispatcher}
+func NewPipelineBuilder(dispatcher types.FrameHandler, ctx context.Context) *PipelineBuilder {
+	return &PipelineBuilder{dispatcher: dispatcher, ctx: ctx}
 }
 
 func (b *PipelineBuilder) WithSource(source types.DataSource) *PipelineBuilder {
@@ -159,5 +135,7 @@ func (b *PipelineBuilder) Build() (*Pipeline, error) {
 		source:      b.source,
 		filterChain: b.filterChain,
 		dispatcher:  b.dispatcher,
+		ctx:         b.ctx,
+		wg:          &sync.WaitGroup{},
 	}, nil
 }
