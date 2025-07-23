@@ -1,4 +1,4 @@
-package packet
+package filter
 
 import (
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"

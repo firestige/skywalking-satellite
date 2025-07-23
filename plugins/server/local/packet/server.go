@@ -8,7 +8,6 @@ import (
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/capture"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
-	"github.com/apache/skywalking-satellite/plugins/server/local/packet/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -18,17 +17,31 @@ const (
 	Description = "A server plugin for packet capture and processing"
 )
 
+type AfpacketConfig struct {
+	Interface    string `mapstructure:"interface"`     // Network interface to capture on
+	SnapLen      int    `mapstructure:"snap_len"`      // Snapshot length for packet capture
+	NumBlocks    int    `mapstructure:"num_blocks"`    // Number of blocks in the ring buffer
+	BlockSize    int    `mapstructure:"block_size"`    // Size of each block in the ring buffer
+	FlushTimeout int    `mapstructure:"flush_timeout"` // Timeout for flushing packets
+	Filter       string `mapstructure:"filter"`        // BPF filter expression
+}
+
+type CodecConfig struct {
+	// Codec configuration for packet processing
+	RingSize       int      `mapstructure:"ring_size"`       // Size of the ring buffer for packet processing
+	Mtu            int      `mapstructure:"mtu"`             // Maximum Transmission Unit for packet processing
+	WorkerCount    int      `mapstructure:"worker_count"`    // Number of worker goroutines for processing packets
+	LocalAddresses []string `mapstructure:"local_addresses"` // Local addresses to filter packets
+
+}
+
 type Server struct {
+	// Configuration for the packet server
 	config.CommonFields
-	capture.CaptureConfig
+	Afpacket AfpacketConfig `mapstructure:"afpacket"` // Configuration for afpacket capture
+	Codec    CodecConfig    `mapstructure:"codec"`    // Configuration for packet codec
 
-	Interface      string            `mapstructure:"interface"`       // Network interface to capture on
-	RingSize       int               `mapstructure:"ring_size"`       // Ring buffer size
-	WorkerCount    int               `mapstructure:"worker_count"`    // Number of worker goroutines
-	MTU            int               `mapstructure:"mtu"`             // Maximum Transmission Unit
-	LocalAddresses []string          `mapstructure:"local_addresses"` // Local addresses to filter
-	Ports          map[string]string `mapstructure:"ports"`           // Ports to filter, e.g., "sip": "5060", "http": "80"
-
+	// components
 	receiverMapping map[string]map[string]func(*types.RawFrameData) error // Mapping of protocol to handler
 	pipeline        *Pipeline
 	ctx             context.Context
@@ -106,12 +119,6 @@ func (s *Server) RegisterHandler(protocol string, name string, handler func(data
 
 func (s *Server) Prepare() error {
 	log.Logger.WithField("server", s.Name()).Info("packet server is preparing...")
-
-	// Set default values if not configured
-	if s.Interface == "" {
-		s.Interface = "any"
-	}
-
 	// Create context and wait group for pipeline lifecycle management
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 
@@ -168,34 +175,14 @@ func (s *Server) Close() error {
 
 // buildPipeline creates and configures the pipeline based on server configuration
 func (s *Server) buildPipeline(ctx context.Context) (*Pipeline, error) {
-	// Create data source with configuration
-	// Convert s.Ports from []int to []uint32
-	var portsUint32 []uint32
-	for _, p := range s.Ports {
-		portsUint32 = append(portsUint32, uint32(p))
-	}
 
-	bpfFilter, err := utils.NewFilterBuilder().
-		IPv4OrDrop().
-		TCP(utils.JumpToIfNoMatch("check_udp")).
-		PortsOrAccept(portsUint32, "check_udp").
-		UDP(utils.WithLabel("check_udp").OrDrop()).
-		PortsOrDrop(portsUint32).
-		Accept().
-		Drop().
-		Compile()
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile BPF filter: %v", err)
-	}
-
-	dataSource, err := NewNetworkCaptureBuilder(s.ctx).
-		WithInterface(s.Interface).
-		WithBPFFilter(bpfFilter).
-		WithRingSize(s.RingSize).
-		WithWorkerCount(s.WorkerCount).
-		WithMTU(s.MTU).
-		WithLocalAddresses(s.LocalAddresses).
+	dataSource, err := capture.NewNetworkCaptureBuilder(s.ctx).
+		WithInterface(s.Afpacket.Interface).
+		WithFilter(s.Afpacket.Filter).
+		WithRingSize(s.Codec.RingSize).
+		WithWorkerCount(s.Codec.WorkerCount).
+		WithMTU(s.Codec.Mtu).
+		WithLocalAddresses(s.Codec.LocalAddresses).
 		Build()
 
 	if err != nil {

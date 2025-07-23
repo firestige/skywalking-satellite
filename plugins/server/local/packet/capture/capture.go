@@ -81,44 +81,6 @@ func (nc *networkCapture) initPools() {
 
 // Prepare 准备抓包环境
 func (nc *networkCapture) Prepare() error {
-	log.Logger.WithField("capture", nc.config.Interface).Debug("Preparing network capture...")
-	nc.mu.Lock()
-	defer nc.mu.Unlock()
-
-	if nc.started {
-		return fmt.Errorf("capture already started")
-	}
-
-	log.Logger.Infof("Preparing network capture on interface: %s", nc.config.Interface)
-
-	// 创建AF_PACKET句柄
-	// OptFrameSize: 设置每个帧的最大大小，相当于传统抓包中的snap length，控制每个数据包的最大捕获长度
-	// OptBlockSize: 设置环形缓冲区中每个块的大小，影响内存使用和性能
-	// OptNumBlocks: 设置环形缓冲区中块的数量，总缓冲区大小 = BlockSize × NumBlocks
-	handle, err := afpacket.NewTPacket(
-		afpacket.OptInterface(nc.config.Interface),
-		afpacket.OptFrameSize(nc.config.SnapLen), // 使用OptFrameSize代替OptSnapLen
-		afpacket.OptNumBlocks(nc.config.NumBlocks),
-		afpacket.OptBlockSize(nc.config.BlockSize),
-		afpacket.OptPollTimeout(nc.config.FlushTimeout),
-		afpacket.TPacketVersion3,
-	)
-	if err != nil {
-		log.Logger.Errorf("Failed to create AF_PACKET handle: %v", err)
-		return fmt.Errorf("failed to create AF_PACKET handle: %w", err)
-	}
-
-	// 设置BPF过滤器
-	if len(nc.config.BPFFilter) > 0 {
-		if err := handle.SetBPF(nc.config.BPFFilter); err != nil {
-			log.Logger.Errorf("Failed to set BPF filter: %v", err)
-			handle.Close()
-			return fmt.Errorf("failed to set BPF filter: %w", err)
-		}
-	}
-
-	nc.handle = handle
-	log.Logger.Info("Network capture prepared successfully")
 	return nil
 }
 
@@ -129,10 +91,6 @@ func (nc *networkCapture) Start() error {
 
 	if nc.started {
 		return fmt.Errorf("capture already started")
-	}
-
-	if nc.handle == nil {
-		return fmt.Errorf("capture not prepared")
 	}
 
 	nc.started = true
@@ -163,6 +121,35 @@ func (nc *networkCapture) Start() error {
 // captureLoop 主抓包循环
 func (nc *networkCapture) captureLoop() {
 	defer nc.wg.Done()
+
+	// 创建AF_PACKET句柄
+	// OptFrameSize: 设置每个帧的最大大小，相当于传统抓包中的snap length，控制每个数据包的最大捕获长度
+	// OptBlockSize: 设置环形缓冲区中每个块的大小，影响内存使用和性能
+	// OptNumBlocks: 设置环形缓冲区中块的数量，总缓冲区大小 = BlockSize × NumBlocks
+	handle, err := afpacket.NewTPacket(
+		afpacket.OptInterface(nc.config.Interface),
+		afpacket.OptFrameSize(nc.config.SnapLen), // 使用OptFrameSize代替OptSnapLen
+		afpacket.OptNumBlocks(nc.config.NumBlocks),
+		afpacket.OptBlockSize(nc.config.BlockSize),
+		afpacket.OptPollTimeout(nc.config.FlushTimeout),
+		afpacket.TPacketVersion3,
+	)
+	if err != nil {
+		log.Logger.Errorf("Failed to create AF_PACKET handle: %v", err)
+		if handle != nil {
+			handle.Close()
+		}
+		return
+	}
+
+	// 设置BPF过滤器
+	if err := handle.SetBPF(nc.config.Filter); err != nil {
+		log.Logger.Errorf("Failed to set BPF filter: %v", err)
+		handle.Close()
+		return
+	}
+
+	nc.handle = handle
 
 	packetSource := gopacket.NewPacketSource(nc.handle, layers.LinkTypeEthernet)
 	packetSource.DecodeOptions.Lazy = true

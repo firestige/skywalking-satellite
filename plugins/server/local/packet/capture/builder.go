@@ -5,14 +5,13 @@ import (
 	"fmt"
 
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
-	"github.com/apache/skywalking-satellite/plugins/server/local/packet/utils"
-	"golang.org/x/net/bpf"
 )
 
 // NetworkCaptureBuilder 构建器
 type NetworkCaptureBuilder struct {
-	config *CaptureConfig
-	ctx    context.Context
+	config    *CaptureConfig
+	bpfFilter string
+	ctx       context.Context
 }
 
 // NewNetworkCaptureBuilder 创建构建器
@@ -30,8 +29,8 @@ func (b *NetworkCaptureBuilder) WithInterface(iface string) *NetworkCaptureBuild
 }
 
 // WithBPFFilter 设置BPF过滤器
-func (b *NetworkCaptureBuilder) WithBPFFilter(filter []bpf.RawInstruction) *NetworkCaptureBuilder {
-	b.config.BPFFilter = filter
+func (b *NetworkCaptureBuilder) WithFilter(filter string) *NetworkCaptureBuilder {
+	b.bpfFilter = filter
 	return b
 }
 
@@ -56,15 +55,6 @@ func (b *NetworkCaptureBuilder) WithMTU(mtu int) *NetworkCaptureBuilder {
 // WithLocalAddresses 设置本机地址
 func (b *NetworkCaptureBuilder) WithLocalAddresses(addresses []string) *NetworkCaptureBuilder {
 	b.config.LocalAddresses = addresses
-	return b
-}
-
-// WithSIPFilter 设置SIP过滤器
-func (b *NetworkCaptureBuilder) WithSIPFilter(port uint32) *NetworkCaptureBuilder {
-	filter, err := utils.PrebuildFilter.SIP(port)
-	if err == nil {
-		b.config.BPFFilter = filter
-	}
 	return b
 }
 

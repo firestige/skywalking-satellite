@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
+	"github.com/apache/skywalking-satellite/plugins/server/local/packet/filter"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 	"github.com/sirupsen/logrus"
 )
@@ -113,7 +114,7 @@ func (b *PipelineBuilder) WithSource(source types.DataSource) *PipelineBuilder {
 }
 
 func (b *PipelineBuilder) WithFilters(filters []types.FrameFilter) *PipelineBuilder {
-	b.filterChain = NewFrameFilterChain(b.dispatcher, filters)
+	b.filterChain = filter.NewFrameFilterChain(b.dispatcher, filters)
 	return b
 }
 
@@ -124,7 +125,7 @@ func (b *PipelineBuilder) Build() (*Pipeline, error) {
 
 	if b.filterChain == nil {
 		// 如果没有过滤器，创建一个空的过滤链
-		b.filterChain = NewFrameFilterChain(b.dispatcher, []types.FrameFilter{})
+		b.filterChain = filter.NewFrameFilterChain(b.dispatcher, []types.FrameFilter{})
 	}
 
 	if b.dispatcher == nil {
