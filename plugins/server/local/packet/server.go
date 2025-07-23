@@ -6,6 +6,7 @@ import (
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
+	"github.com/apache/skywalking-satellite/plugins/server/local/packet/capture"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/utils"
 	"github.com/sirupsen/logrus"
@@ -19,13 +20,14 @@ const (
 
 type Server struct {
 	config.CommonFields
+	capture.CaptureConfig
 
-	Interface      string   `mapstructure:"interface"`       // Network interface to capture on
-	RingSize       int      `mapstructure:"ring_size"`       // Ring buffer size
-	WorkerCount    int      `mapstructure:"worker_count"`    // Number of worker goroutines
-	MTU            int      `mapstructure:"mtu"`             // Maximum Transmission Unit
-	LocalAddresses []string `mapstructure:"local_addresses"` // Local addresses to filter
-	Ports          []int    `mapstructure:"ports"`           // Ports to filter
+	Interface      string            `mapstructure:"interface"`       // Network interface to capture on
+	RingSize       int               `mapstructure:"ring_size"`       // Ring buffer size
+	WorkerCount    int               `mapstructure:"worker_count"`    // Number of worker goroutines
+	MTU            int               `mapstructure:"mtu"`             // Maximum Transmission Unit
+	LocalAddresses []string          `mapstructure:"local_addresses"` // Local addresses to filter
+	Ports          map[string]string `mapstructure:"ports"`           // Ports to filter, e.g., "sip": "5060", "http": "80"
 
 	receiverMapping map[string]map[string]func(*types.RawFrameData) error // Mapping of protocol to handler
 	pipeline        *Pipeline
@@ -72,7 +74,9 @@ local_addresses: []
 # Ports to filter packets on (default: empty, captures all)
 # Use YAML array syntax:
 # ports: [5060, 8021]
-ports: [5060, 8021]
+ports:
+  tcp: "38910 38914-38916"
+  udp: "38917-38919 38911"
 `
 }
 

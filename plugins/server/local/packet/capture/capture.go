@@ -1,10 +1,9 @@
-package packet
+package capture
 
 import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
@@ -12,66 +11,35 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/afpacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
-	"golang.org/x/net/bpf"
 )
-
-// CaptureConfig 配置结构
-type CaptureConfig struct {
-	Interface      string               // 网络接口名称
-	BPFFilter      []bpf.RawInstruction // BPF过滤规则
-	SnapLen        int                  // 抓包长度
-	RingSize       int                  // 环形缓冲区大小
-	WorkerCount    int                  // 工作协程数量
-	MTU            int                  // 最大传输单元
-	BlockSize      int                  // AF_PACKET块大小
-	NumBlocks      int                  // AF_PACKET块数量
-	FlushTimeout   time.Duration        // 超时时间
-	LocalAddresses []string             // 本机地址列表
-}
-
-// DefaultCaptureConfig 默认配置
-// todo builder写的有问题，配置没生效，生效的是这里的配置
-func DefaultCaptureConfig() *CaptureConfig {
-	return &CaptureConfig{
-		Interface:      "eth0",
-		SnapLen:        65536,
-		RingSize:       1024,
-		WorkerCount:    4,
-		MTU:            1500,
-		BlockSize:      1024 * 1024,
-		NumBlocks:      128,
-		FlushTimeout:   pcap.BlockForever,
-		LocalAddresses: GetLocalAddresses(),
-	}
-}
 
 // networkCapture 网络抓包实现
 type networkCapture struct {
+	// 配置信息
 	config *CaptureConfig
 
-	// AF_PACKET句柄
-	handle *afpacket.TPacket
+	// 核心组件 - 网络层
+	handle *afpacket.TPacket // AF_PACKET句柄
 
-	// 数据处理组件
+	// 核心组件 - 数据处理
 	ringBuffer   *utils.RingBuffer
 	tcpAssembler *TCPAssembler
 
-	// 工作协程管理
+	// 并发控制
 	ctx context.Context
 	wg  *sync.WaitGroup
+	mu  *sync.RWMutex
 
 	// 数据通道
 	packetChan chan *types.PacketInfo
 	frameChan  chan *types.RawFrameData
 
-	// 对象池
+	// 性能优化 - 对象池
 	packetPool *sync.Pool
 	bufferPool *sync.Pool
 
-	// 状态
+	// 状态管理
 	started bool
-	mu      *sync.RWMutex
 }
 
 // newNetworkCapture 创建网络抓包实例
@@ -476,90 +444,4 @@ func (nc *networkCapture) Close() error {
 
 	log.Logger.Info("Network capture closed successfully")
 	return nil
-}
-
-// NetworkCaptureBuilder 构建器
-type NetworkCaptureBuilder struct {
-	config *CaptureConfig
-	ctx    context.Context
-}
-
-// NewNetworkCaptureBuilder 创建构建器
-func NewNetworkCaptureBuilder(ctx context.Context) *NetworkCaptureBuilder {
-	return &NetworkCaptureBuilder{
-		config: DefaultCaptureConfig(),
-		ctx:    ctx,
-	}
-}
-
-// WithInterface 设置网络接口
-func (b *NetworkCaptureBuilder) WithInterface(iface string) *NetworkCaptureBuilder {
-	b.config.Interface = iface
-	return b
-}
-
-// WithBPFFilter 设置BPF过滤器
-func (b *NetworkCaptureBuilder) WithBPFFilter(filter []bpf.RawInstruction) *NetworkCaptureBuilder {
-	b.config.BPFFilter = filter
-	return b
-}
-
-// WithRingSize 设置环形缓冲区大小
-func (b *NetworkCaptureBuilder) WithRingSize(size int) *NetworkCaptureBuilder {
-	b.config.RingSize = size
-	return b
-}
-
-// WithWorkerCount 设置工作协程数量
-func (b *NetworkCaptureBuilder) WithWorkerCount(count int) *NetworkCaptureBuilder {
-	b.config.WorkerCount = count
-	return b
-}
-
-// WithMTU 设置MTU
-func (b *NetworkCaptureBuilder) WithMTU(mtu int) *NetworkCaptureBuilder {
-	b.config.MTU = mtu
-	return b
-}
-
-// WithLocalAddresses 设置本机地址
-func (b *NetworkCaptureBuilder) WithLocalAddresses(addresses []string) *NetworkCaptureBuilder {
-	b.config.LocalAddresses = addresses
-	return b
-}
-
-// WithSIPFilter 设置SIP过滤器
-func (b *NetworkCaptureBuilder) WithSIPFilter(port uint32) *NetworkCaptureBuilder {
-	filter, err := utils.PrebuildFilter.SIP(port)
-	if err == nil {
-		b.config.BPFFilter = filter
-	}
-	return b
-}
-
-// Build 构建DataSource
-func (b *NetworkCaptureBuilder) Build() (types.DataSource, error) {
-	// 验证配置
-	if b.config.Interface == "" {
-		return nil, fmt.Errorf("interface is required")
-	}
-
-	if b.config.WorkerCount <= 0 {
-		b.config.WorkerCount = 4
-	}
-
-	if b.config.RingSize <= 0 {
-		b.config.RingSize = 1024
-	}
-
-	if len(b.config.LocalAddresses) == 0 {
-		b.config.LocalAddresses = GetLocalAddresses()
-	}
-
-	return newNetworkCapture(b.config, b.ctx), nil
-}
-
-func (b *NetworkCaptureBuilder) String() string {
-	return fmt.Sprintf("NetworkCaptureBuilder{Interface: %s, RingSize: %d, WorkerCount: %d, MTU: %d, LocalAddresses: %v}",
-		b.config.Interface, b.config.RingSize, b.config.WorkerCount, b.config.MTU, b.config.LocalAddresses)
 }

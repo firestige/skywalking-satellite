@@ -1,7 +1,6 @@
 package packet
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
@@ -29,20 +28,6 @@ func (a *frameHandlerAdapter) Name() string {
 	return a.name
 }
 
-func (a *frameHandlerAdapter) Prepare(ctx context.Context) error {
-	return nil // No preparation needed for dispatcher
-}
-
-func (a *frameHandlerAdapter) Start() error {
-	// No specific start logic for dispatcher
-	return nil
-}
-
-func (a *frameHandlerAdapter) Close() error {
-	// No specific close logic for dispatcher
-	return nil
-}
-
 type dispatcher struct {
 	handlerMapping map[string]types.FrameHandler
 }
@@ -57,20 +42,6 @@ func (d *dispatcher) Handle(frame *types.RawFrameData) error {
 	} else {
 		return fmt.Errorf("no handler found for protocol: %s", protocol)
 	}
-}
-
-func (d *dispatcher) Prepare(ctx context.Context) error {
-	return nil // No preparation needed for dispatcher
-}
-
-func (d *dispatcher) Start() error {
-	// No specific start logic for dispatcher
-	return nil
-}
-
-func (d *dispatcher) Close() error {
-	// No specific close logic for dispatcher
-	return nil
 }
 
 type DispatcherBuilder struct {
