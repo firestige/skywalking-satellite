@@ -2,6 +2,7 @@ package capture
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
@@ -9,78 +10,69 @@ import (
 
 // NetworkCaptureBuilder 构建器
 type NetworkCaptureBuilder struct {
-	config    *CaptureConfig
-	bpfFilter string
-	ctx       context.Context
+	options *Options
+	ctx     context.Context
 }
 
 // NewNetworkCaptureBuilder 创建构建器
 func NewNetworkCaptureBuilder(ctx context.Context) *NetworkCaptureBuilder {
 	return &NetworkCaptureBuilder{
-		config: DefaultCaptureConfig(),
-		ctx:    ctx,
+		options: DefaultOptions(),
+		ctx:     ctx,
 	}
 }
 
 // WithInterface 设置网络接口
 func (b *NetworkCaptureBuilder) WithInterface(iface string) *NetworkCaptureBuilder {
-	b.config.Interface = iface
+	b.options.Interface = iface
 	return b
 }
 
 // WithBPFFilter 设置BPF过滤器
 func (b *NetworkCaptureBuilder) WithFilter(filter string) *NetworkCaptureBuilder {
-	b.bpfFilter = filter
+	b.options.Filter = filter
 	return b
 }
 
 // WithRingSize 设置环形缓冲区大小
 func (b *NetworkCaptureBuilder) WithRingSize(size int) *NetworkCaptureBuilder {
-	b.config.RingSize = size
+	b.options.RingSize = size
 	return b
 }
 
 // WithWorkerCount 设置工作协程数量
 func (b *NetworkCaptureBuilder) WithWorkerCount(count int) *NetworkCaptureBuilder {
-	b.config.WorkerCount = count
+	b.options.WorkerCount = count
 	return b
 }
 
 // WithMTU 设置MTU
 func (b *NetworkCaptureBuilder) WithMTU(mtu int) *NetworkCaptureBuilder {
-	b.config.MTU = mtu
+	b.options.MTU = mtu
 	return b
 }
 
 // WithLocalAddresses 设置本机地址
 func (b *NetworkCaptureBuilder) WithLocalAddresses(addresses []string) *NetworkCaptureBuilder {
-	b.config.LocalAddresses = addresses
+	b.options.LocalAddresses = addresses
 	return b
 }
 
 // Build 构建DataSource
 func (b *NetworkCaptureBuilder) Build() (types.DataSource, error) {
 	// 验证配置
-	if b.config.Interface == "" {
-		return nil, fmt.Errorf("interface is required")
+	if err := b.options.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid options: %w", err)
 	}
-
-	if b.config.WorkerCount <= 0 {
-		b.config.WorkerCount = 4
-	}
-
-	if b.config.RingSize <= 0 {
-		b.config.RingSize = 1024
-	}
-
-	if len(b.config.LocalAddresses) == 0 {
-		b.config.LocalAddresses = GetLocalAddresses()
-	}
-
-	return newNetworkCapture(b.config, b.ctx), nil
+	return newNetworkCapture(b.options, b.ctx), nil
 }
 
 func (b *NetworkCaptureBuilder) String() string {
-	return fmt.Sprintf("NetworkCaptureBuilder{Interface: %s, RingSize: %d, WorkerCount: %d, MTU: %d, LocalAddresses: %v}",
-		b.config.Interface, b.config.RingSize, b.config.WorkerCount, b.config.MTU, b.config.LocalAddresses)
+	jsonBytes, err := json.Marshal(b.options)
+	if err != nil {
+		// 如果JSON序列化失败，返回错误信息
+		return fmt.Sprintf(`{"error":"failed to marshal options: %v"}`, err)
+	}
+
+	return string(jsonBytes)
 }

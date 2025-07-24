@@ -3,10 +3,13 @@ package packet
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
+	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/capture"
+	"github.com/apache/skywalking-satellite/plugins/server/local/packet/filter"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 	"github.com/sirupsen/logrus"
 )
@@ -32,7 +35,6 @@ type CodecConfig struct {
 	Mtu            int      `mapstructure:"mtu"`             // Maximum Transmission Unit for packet processing
 	WorkerCount    int      `mapstructure:"worker_count"`    // Number of worker goroutines for processing packets
 	LocalAddresses []string `mapstructure:"local_addresses"` // Local addresses to filter packets
-
 }
 
 type Server struct {
@@ -43,9 +45,14 @@ type Server struct {
 
 	// components
 	receiverMapping map[string]map[string]func(*types.RawFrameData) error // Mapping of protocol to handler
-	pipeline        *Pipeline
-	ctx             context.Context
-	cancel          context.CancelFunc
+	source          types.DataSource
+	filterChain     types.FrameFilterChain
+	dispatcher      types.FrameHandler
+
+	// 并发控制
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     *sync.WaitGroup
 }
 
 func (s *Server) Name() string {
@@ -61,36 +68,7 @@ func (s *Server) Description() string {
 }
 
 func (s *Server) DefaultConfig() string {
-	return `
-# Network interface to capture packets on (default: any)
-interface: "any"
-
-# Ring buffer size for packet capture (default: 65536)
-ring_size: 65536
-
-# worker_count: Number of worker goroutines to process packets (default: 4)
-worker_count: 4
-
-# MTU (Maximum Transmission Unit) size in bytes (default: 1500)
-mtu: 1500
-
-# Local addresses to capture packets from (default: empty, captures all)
-# Use YAML array syntax:
-# local_addresses: ["192.168.1.100", "10.0.0.1", "172.16.0.1"]
-# Or YAML list syntax:
-# local_addresses:
-#   - "192.168.1.100"
-#   - "10.0.0.1"
-#   - "172.16.0.1"
-local_addresses: []
-
-# Ports to filter packets on (default: empty, captures all)
-# Use YAML array syntax:
-# ports: [5060, 8021]
-ports:
-  tcp: "38910 38914-38916"
-  udp: "38917-38919 38911"
-`
+	return ``
 }
 
 func (s *Server) GetServer() interface{} {
@@ -119,35 +97,36 @@ func (s *Server) RegisterHandler(protocol string, name string, handler func(data
 
 func (s *Server) Prepare() error {
 	log.Logger.WithField("server", s.Name()).Info("packet server is preparing...")
-	// Create context and wait group for pipeline lifecycle management
+
+	// Create context and wait group for lifecycle management
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.wg = &sync.WaitGroup{}
+
+	// Build components
+	if err := s.buildComponents(); err != nil {
+		return fmt.Errorf("failed to build components: %v", err)
+	}
+
+	// Prepare data source
+	if err := s.source.Prepare(); err != nil {
+		return fmt.Errorf("failed to prepare source: %v", err)
+	}
 
 	log.Logger.WithField("server", s.Name()).Info("packet server prepared successfully")
 	return nil
 }
 
 func (s *Server) Start() error {
-	log.Logger.WithField("server", s.Name()).Info("packet server is about to start...")
-	// Build pipeline with configuration
-	pipeline, err := s.buildPipeline(s.ctx)
-	if err != nil {
-		return fmt.Errorf("failed to build pipeline: %v", err)
-	}
-	s.pipeline = pipeline
-
-	log.Logger.WithField("server", s.Name()).Info("packet server pipeline built successfully")
-
-	// Prepare the pipeline
-	if err := s.pipeline.Prepare(); err != nil {
-		return fmt.Errorf("failed to prepare pipeline: %v", err)
-	}
-
 	log.Logger.WithField("server", s.Name()).Info("packet server is starting...")
 
-	// Start the pipeline
-	if err := s.pipeline.Start(); err != nil {
-		return fmt.Errorf("failed to start pipeline: %v", err)
+	// Start data source
+	if err := s.source.Start(); err != nil {
+		return fmt.Errorf("failed to start source: %v", err)
 	}
+
+	// Start processing loop
+	s.wg.Add(1)
+	go s.run()
 
 	log.Logger.WithField("server", s.Name()).Info("packet server started successfully")
 	return nil
@@ -156,16 +135,20 @@ func (s *Server) Start() error {
 func (s *Server) Close() error {
 	log.Logger.WithField("server", s.Name()).Info("packet server is closing...")
 
-	// Cancel context to signal pipeline to stop
+	// Cancel context to signal goroutines to stop
 	if s.cancel != nil {
 		s.cancel()
 	}
 
-	// Close the pipeline
-	if s.pipeline != nil {
-		if err := s.pipeline.Close(); err != nil {
-			log.Logger.WithField("server", s.Name()).Errorf("failed to close pipeline: %v", err)
-			return err
+	// Wait for all goroutines to finish
+	if s.wg != nil {
+		s.wg.Wait()
+	}
+
+	// Close data source
+	if s.source != nil {
+		if err := s.source.Close(); err != nil {
+			log.Logger.WithField("server", s.Name()).WithError(err).Error("failed to close source")
 		}
 	}
 
@@ -173,9 +156,9 @@ func (s *Server) Close() error {
 	return nil
 }
 
-// buildPipeline creates and configures the pipeline based on server configuration
-func (s *Server) buildPipeline(ctx context.Context) (*Pipeline, error) {
-
+// buildComponents
+func (s *Server) buildComponents() error {
+	// Create data source
 	dataSource, err := capture.NewNetworkCaptureBuilder(s.ctx).
 		WithInterface(s.Afpacket.Interface).
 		WithFilter(s.Afpacket.Filter).
@@ -186,8 +169,9 @@ func (s *Server) buildPipeline(ctx context.Context) (*Pipeline, error) {
 		Build()
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to create data source: %v", err)
+		return fmt.Errorf("failed to create data source: %v", err)
 	}
+	s.source = dataSource
 
 	// Create frame handler/dispatcher
 	builder := NewDispatcherBuilder()
@@ -198,17 +182,49 @@ func (s *Server) buildPipeline(ctx context.Context) (*Pipeline, error) {
 	}
 	dispatcher, err := builder.Build()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create frame handler: %v", err)
+		return fmt.Errorf("failed to create frame handler: %v", err)
 	}
+	s.dispatcher = dispatcher
 
-	// Build pipeline using builder pattern
-	pipeline, err := NewPipelineBuilder(dispatcher, ctx).
-		WithSource(dataSource).
-		Build()
+	// Create filter chain (如果需要过滤器的话)
+	s.filterChain = filter.NewFrameFilterChain(s.dispatcher, []types.FrameFilter{})
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to build pipeline: %v", err)
+	return nil
+}
+
+// run 处理循环 (原来pipeline的run方法)
+func (s *Server) run() {
+	defer func() {
+		s.wg.Done()
+		if r := recover(); r != nil {
+			log.Logger.WithFields(logrus.Fields{
+				"server": s.Name(),
+				"error":  r,
+				"stack":  string(debug.Stack()),
+			}).Error("Server processing panic recovered")
+		}
+	}()
+
+	log.Logger.WithField("server", s.Name()).Info("Server processing loop started")
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			log.Logger.WithField("server", s.Name()).Info("Server context done, stopping processing loop...")
+			return
+		default:
+			frame, err := s.source.Fetch()
+			if err != nil {
+				log.Logger.WithField("server", s.Name()).WithError(err).Error("Error fetching frame")
+				continue
+			}
+
+			if frame == types.EmptyRawFrameData {
+				continue
+			}
+
+			// 通过过滤链处理frame
+			s.filterChain.Filter(frame)
+		}
 	}
-
-	return pipeline, nil
 }
