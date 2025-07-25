@@ -14,12 +14,21 @@ const (
 	ESL = "ESL"
 )
 
+// Direction represents packet direction
+type Direction string
+
+const (
+	Inbound  Direction = "inbound"
+	Outbound Direction = "outbound"
+	Unknown  Direction = "unknown"
+)
+
 type RawFrameData struct {
 	Data       []byte
 	Meta       map[string]string
 	Connection Connection
 	Timestamp  int64
-	Direction  string // "inbound" or "outbound"
+	Direction  Direction // "inbound" or "outbound"
 }
 
 var EmptyRawFrameData = &RawFrameData{}
