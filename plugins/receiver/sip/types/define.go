@@ -1,4 +1,4 @@
-package sip
+package types
 
 import (
 	"sync"
@@ -6,6 +6,19 @@ import (
 
 	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
 )
+
+type Connection struct {
+	id       string
+	SrcIp    string
+	SrcPort  int
+	DstIp    string
+	DstPort  int
+	Protocol string
+}
+
+type WithConnection interface {
+	Connection() *Connection
+}
 
 type SipMessage interface {
 	CallId() string

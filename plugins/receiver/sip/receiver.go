@@ -13,6 +13,7 @@ import (
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativetracing"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
+	"github.com/google/gopacket/layers"
 	"google.golang.org/protobuf/proto"
 	common "skywalking.apache.org/repo/goapi/collect/common/v3"
 	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
@@ -30,6 +31,7 @@ type Receiver struct {
 	config.CommonFields
 	ServiceName     string `mapstructure:"service_name"`     // 服务名称
 	ServiceInstance string `mapstructure:"service_instance"` // 服务实例
+	Ports           string `mapstructure:"ports"`            // 监听的端口列表，逗号分隔
 
 	OutputChannel  chan *v1.SniffData
 	Server         *packet.Server
@@ -68,7 +70,8 @@ func (r *Receiver) RegisterHandler(server interface{}) {
 		CleanupInterval: 1 * time.Minute, // 自动清理间隔
 	}
 	r.sessionManager = NewSessionManager(*config)
-	r.Server.RegisterHandler("UDP", "sip", r.packetHandler)
+	r.Server.RegisterHandler(layers.IPProtocolTCP, r.Ports, "Sip-TCP-Handler", r.processTCPFrame)
+	r.Server.RegisterHandler(layers.IPProtocolUDP, r.Ports, "Sip-UDP-Handler", r.processUDPFrame)
 }
 
 func (r *Receiver) RegisterSyncInvoker(_ module.SyncInvoker) {

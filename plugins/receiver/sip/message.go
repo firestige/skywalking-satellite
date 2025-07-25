@@ -1,11 +1,14 @@
 package sip
 
+import "github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
+
 type sipMessage struct {
-	callId  string
-	cSeq    string
-	headers map[string]string
-	body    string
-	request bool
+	callId     string
+	cSeq       string
+	headers    map[string]string
+	body       string
+	request    bool
+	connection *types.Connection // 添加连接信息
 }
 
 type sipRequest struct {
@@ -39,6 +42,10 @@ func (m *sipMessage) Body() string {
 
 func (m *sipMessage) IsRquest() bool {
 	return m.request
+}
+
+func (m *sipMessage) Connection() *types.Connection {
+	return m.connection
 }
 
 // SipRequest interface implementations
