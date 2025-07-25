@@ -57,7 +57,6 @@ type DataSource interface {
 	Prepare() error
 	Start() error
 	Close() error
-	Fetch() (*RawFrameData, error)
 }
 
 type FrameFilter interface {
