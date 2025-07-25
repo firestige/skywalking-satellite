@@ -40,8 +40,11 @@ func (m *manager) CreateSession(msg *types.SipMessage) (*types.Session, error) {
 	// 	如果当前消息是会话内消息并且不是起始消息，则返回 nil，因为不论出栈入栈，会话内消息一定是从起始请求开始
 	//  如果当前消息是会话内消息并且是起始消息，则创建一个新的会话
 	// 2.为新的会话，创建新的SegmentObject
-	// 	traceId=callId
-	//  segmentId=callId+cseq
+	// 	traceId=if msg.headers().Get("X-ICC-Call-id") != "" msg.headers().Get("X-ICC-Call-id") or msg.callId()
+	//  segmentId=segmentIdGenerator.GenerateSegmentID()
+	//  service=serviceName
+	//  instance=instanceId
+
 	return nil, nil
 }
 
