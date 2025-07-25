@@ -29,7 +29,7 @@ type Connection struct {
 	SrcPort  int
 	DestHost string
 	DstPort  int
-	Protocol string
+	Protocol layers.IPProtocol
 }
 
 // PacketInfo 包信息

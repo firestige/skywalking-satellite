@@ -7,7 +7,9 @@ import (
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/capture"
+	"github.com/apache/skywalking-satellite/plugins/server/local/packet/handler"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
+	"github.com/google/gopacket/layers"
 	"github.com/sirupsen/logrus"
 )
 
@@ -42,10 +44,10 @@ type Server struct {
 	Codec    CodecConfig    `mapstructure:"codec"`    // Configuration for packet codec
 
 	// components
-	receiverMapping map[string]map[string]func(*types.RawFrameData) error // Mapping of protocol to handler
-	pipeline        *Pipeline
-	ctx             context.Context
-	cancel          context.CancelFunc
+	dispatcherBuilder *handler.DispatcherBuilder
+	pipeline          *Pipeline
+	ctx               context.Context
+	cancel            context.CancelFunc
 }
 
 func (s *Server) Name() string {
@@ -97,22 +99,14 @@ func (s *Server) GetServer() interface{} {
 	return s
 }
 
-func (s *Server) RegisterHandler(protocol string, name string, handler func(data *types.RawFrameData) error) {
-	if s.receiverMapping == nil {
-		s.receiverMapping = make(map[string]map[string]func(*types.RawFrameData) error)
+func (s *Server) RegisterHandler(protocol layers.IPProtocol, ports string, name string, fn func(data *types.RawFrameData) error) {
+	if s.dispatcherBuilder == nil {
+		s.dispatcherBuilder = handler.NewDispatcherBuilder()
 	}
-	if _, exists := s.receiverMapping[protocol]; !exists {
-		s.receiverMapping[protocol] = make(map[string]func(*types.RawFrameData) error)
-	}
-	if _, exists := s.receiverMapping[protocol][name]; exists {
-		log.Logger.WithFields(logrus.Fields{
-			"protocol": protocol,
-			"name":     name,
-		}).Warn("Handler already exists, overwriting")
-	}
-	s.receiverMapping[protocol][name] = handler
+	s.dispatcherBuilder.WithHandler(protocol, ports, name, fn)
 	log.Logger.WithFields(logrus.Fields{
 		"protocol": protocol,
+		"ports":    ports,
 		"name":     name,
 	}).Info("Registered packet handler")
 }
@@ -190,13 +184,7 @@ func (s *Server) buildPipeline(ctx context.Context) (*Pipeline, error) {
 	}
 
 	// Create frame handler/dispatcher
-	builder := NewDispatcherBuilder()
-	for protocol, handlers := range s.receiverMapping {
-		for name, handler := range handlers {
-			builder.WithHandler(protocol, name, handler)
-		}
-	}
-	dispatcher, err := builder.Build()
+	dispatcher, err := s.dispatcherBuilder.Build()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create frame handler: %v", err)
 	}

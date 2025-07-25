@@ -325,7 +325,7 @@ func (nc *networkCapture) processUDPPacket(packetInfo *types.PacketInfo) {
 		SrcPort:  int(udp.SrcPort),
 		DestHost: ip.DstIP.String(),
 		DstPort:  int(udp.DstPort),
-		Protocol: types.UDP,
+		Protocol: layers.IPProtocolUDP,
 	}
 
 	// 创建RawFrameData
