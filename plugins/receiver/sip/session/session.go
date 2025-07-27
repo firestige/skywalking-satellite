@@ -17,11 +17,12 @@ type session struct {
 
 func NewSession(id string, sessionType types.SessionType) *session {
 	return &session{
-		id:        id,
-		dialogs:   make(map[string]types.Dialog),
-		createAt:  time.Now().Unix(),
-		updatedAt: time.Now().Unix(),
-		metadatas: make(map[string]interface{}),
+		id:          id,
+		dialogs:     make(map[string]types.Dialog),
+		sessionType: sessionType,
+		createAt:    time.Now().Unix(),
+		updatedAt:   time.Now().Unix(),
+		metadatas:   make(map[string]interface{}),
 	}
 }
 
@@ -34,7 +35,6 @@ func (s *session) Dialogs() map[string]types.Dialog {
 }
 
 func (s *session) SessionType() types.SessionType {
-	// 实现具体的逻辑来返回会话类型
 	return s.sessionType
 }
 
@@ -48,10 +48,12 @@ func (s *session) UpdatedAt() int64 {
 
 func (s *session) AddDialog(dialog types.Dialog) {
 	s.dialogs[dialog.ID()] = dialog
+	s.updatedAt = time.Now().Unix()
 }
 
 func (s *session) RemoveDialog(dialogID string) {
 	delete(s.dialogs, dialogID)
+	s.updatedAt = time.Now().Unix()
 }
 func (s *session) GetDialog(dialogID string) types.Dialog {
 	return s.dialogs[dialogID]
@@ -63,7 +65,7 @@ func (s *session) GetOrCreateDialogIfAbsent(msg types.SipMessage) types.Dialog {
 		return dialog
 	}
 	// 创建新的Dialog
-	newDialog := types.NewDialog(dialogID, msg.FromTag(), msg.ToTag(), msg.FromURI(), msg.ToURI())
+	newDialog := NewDialog()
 	s.AddDialog(newDialog)
 	return newDialog
 }

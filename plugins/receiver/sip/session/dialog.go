@@ -198,35 +198,3 @@ func (d *dialog) GetOrCreateTransactionIfAbsent(msg types.SipMessage) types.Tran
 	d.transactions[txID] = newTx
 	return newTx
 }
-
-// 你需要根据你的业务实现newTransaction
-func newTransaction(txID string, msg types.SipMessage) types.Transaction {
-	// 这里只是示例，实际应根据msg内容和类型构造Transaction对象
-	return &transaction{
-		id:        txID,
-		createdAt: time.Now().Unix(),
-		updatedAt: time.Now().Unix(),
-		// 其它字段根据实际情况设置
-	}
-}
-
-type transaction struct {
-	id        string
-	createdAt int64
-	updatedAt int64
-	// 其它字段...
-}
-
-func (t *transaction) ID() string {
-	return t.id
-}
-
-func (t *transaction) CreatedAt() int64 {
-	return t.createdAt
-}
-
-func (t *transaction) UpdatedAt() int64 {
-	return t.updatedAt
-}
-
-// 根据需要实现Transaction的其它方法
