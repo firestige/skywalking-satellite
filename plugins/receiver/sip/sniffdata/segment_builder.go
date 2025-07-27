@@ -1,6 +1,11 @@
 package sniffdata
 
 import (
+	"fmt"
+	"runtime"
+	"sync"
+	"time"
+
 	"google.golang.org/protobuf/proto"
 	common "skywalking.apache.org/repo/goapi/collect/common/v3"
 	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
@@ -14,24 +19,16 @@ type SegmentBuilder struct {
 	TraceId         string
 	SegmentId       string
 	Spans           []*agent.SpanObject
+	idGenerator     *SegmentIDGenerator
 }
 
-func NewSegmentBuilder() *SegmentBuilder {
+func NewSegmentBuilder(serviceName string, instanceID string) *SegmentBuilder {
 	return &SegmentBuilder{
-		Spans: make([]*agent.SpanObject, 0),
+		ServiceName:     serviceName,
+		ServiceInstance: instanceID,
+		Spans:           make([]*agent.SpanObject, 0),
+		idGenerator:     NewSegmentIDGenerator(instanceID),
 	}
-}
-
-func (b *SegmentBuilder) WithServiceName(serviceName string) *SegmentBuilder {
-	// 设置服务名称
-	b.ServiceName = serviceName
-	return b
-}
-
-func (b *SegmentBuilder) WithServiceInstance(serviceInstance string) *SegmentBuilder {
-	// 设置服务实例名称
-	b.ServiceInstance = serviceInstance
-	return b
 }
 
 func (b *SegmentBuilder) WithTimestamp(timestamp int64) *SegmentBuilder {
@@ -352,4 +349,40 @@ func (b *SegmentReferenceBuilder) Build() *agent.SegmentReference {
 		ParentEndpoint:           b.ParentEndpoint,
 		NetworkAddressUsedAtPeer: b.NetworkAddressUsedAtPeer,
 	}
+}
+
+type SegmentIDGenerator struct {
+	instanceId string
+	next       int64
+	mutex      *sync.Mutex
+}
+
+func NewSegmentIDGenerator(instanceId string) *SegmentIDGenerator {
+	return &SegmentIDGenerator{
+		instanceId: instanceId,
+		next:       0,
+		mutex:      &sync.Mutex{},
+	}
+}
+
+func (g *SegmentIDGenerator) Generate() string {
+	g.mutex.Lock()
+	defer g.mutex.Unlock()
+
+	// 获取当前goroutine ID (或使用固定ID)
+	goroutineID := runtime.NumGoroutine() // 简化版本
+
+	// 获取当前时间戳 (毫秒)
+	timestamp := time.Now().UnixNano() / 1e6
+
+	id := fmt.Sprintf("%s.%d.%d.%d",
+		g.instanceId,
+		goroutineID,
+		timestamp,
+		g.next)
+
+	g.next++
+
+	// 生成segment ID: instanceId.goroutineId.timestamp.sequence
+	return id
 }

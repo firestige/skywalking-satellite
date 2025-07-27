@@ -4,7 +4,7 @@ type SipObject interface {
 	// returns the whole object as a string in RFC 3261 format
 	// this is useful for debugging and logging
 	String() string
-	CallId() string
+	Direction() Direction
 }
 
 type SipContent interface {
@@ -14,11 +14,21 @@ type SipContent interface {
 type SipMessage interface {
 	SipObject
 	Headers() map[string]string
+	CallID() string
+	CSeq() string
+	FromTag() string
+	ToTag() string
+	SetToTag(tag string)
+	ViaBranch() string
 	IsRequest() bool
+	isAck() bool
+	isBye() bool
+	isCancel() bool
 }
 
 type SipRequest interface {
-	Method() string
+	Method() Method
+	MethodAsString() string
 	RequestLine() string
 	SipMessage
 	SipContent

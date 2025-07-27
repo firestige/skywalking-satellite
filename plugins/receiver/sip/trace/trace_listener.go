@@ -1,11 +1,26 @@
 package sip
 
-import "github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
+import (
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
+)
 
 type TraceListener struct {
+	serviceName       string
+	serviceInstanceId string
+	manager           *TraceManager
 }
 
-func (l *TraceListener) OnDialogCreated(dialog types.Dialog) {}
+func NewTraceListener(serviceName, serviceInstanceId string) *TraceListener {
+	return &TraceListener{
+		serviceName:       serviceName,
+		serviceInstanceId: serviceInstanceId,
+		manager:           NewTraceManager(serviceName, serviceInstanceId),
+	}
+}
+
+func (l *TraceListener) OnDialogCreated(dialog types.Dialog) {
+
+}
 
 func (l *TraceListener) OnDialogStateChanged(dialog types.Dialog) {}
 

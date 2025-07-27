@@ -1,11 +1,39 @@
 package types
 
+type Session interface {
+	ID() string
+	Dialogs() map[string]Dialog
+	SessionType() SessionType
+	CreateAt() int64
+	UpdatedAt() int64
+	AddDialog(dialog Dialog)
+	RemoveDialog(dialogID string)
+	GetDialog(dialogID string) Dialog
+	GetOrCreateDialogIfAbsent(msg SipMessage) Dialog
+	Metadatas() map[string]interface{}
+	SetMetadata(key string, value interface{})
+	GetMetadata(key string) (interface{}, bool)
+}
+
+type SessionType int
+
+const (
+	SessionTypeInvite SessionType = iota
+	SessionTypeSubscribe
+	SessionTypeNotify
+	// ...
+)
+
+type SessionManager interface {
+	Handle(msg SipMessage)
+	GetSession(sessionID string) *Session
+}
+
 type Dialog interface {
 	ID() string
 	State() DialogState
-	SetState(state DialogState)
-	UA() UA
-	Transactions() []Transaction
+	UA() UAType
+	Transactions() map[string]Transaction
 	AddTransaction(tx Transaction)
 	RemoveTransaction(txID string)
 	CallID() string
@@ -13,23 +41,37 @@ type Dialog interface {
 	RemoteTag() string
 	LocalURI() string
 	RemoteURI() string
-	SessionType() SessionType
 	CreatedAt() int64
 	UpdatedAt() int64
-	// 可选：属性扩展
-	SetAttribute(key string, value interface{})
-	GetAttribute(key string) (interface{}, bool)
 }
 
 type DialogManager interface {
+	// 创建新的Dialog
+	// 如果已存在，则返回现有的Dialog
+	// 如果不存在，则创建新的Dialog并返回
 	CreateDialog(callID, localTag, remoteTag, localURI, remoteURI string, sessionType SessionType) Dialog
+	// 获取Dialog
+	// 如果没有找到，则直接返回nil
+	// 如果有多个Dialog，则返回第一个找到的
 	GetDialog(id string) Dialog
+	// 更新Dialog状态
 	UpdateDialog(dialog Dialog) error
+	// 删除Dialog
 	DeleteDialog(id string) error
+	// 添加监听器
 	AddListener(name string, listener DialogListener)
+	// 移除监听器
 	RemoveListener(name string, listener DialogListener)
+	// 获取所有Dialog
 	GetDialogs() []Dialog
+	// 根据CallID和FromTag获取Dialog
+	// 如果没有找到，则直接返回nil
 	GetDialogsByCallID(callID string) []Dialog
+	// 根据消息获取Dialog
+	// 如果消息是请求，则根据CallID和FromTag获取
+	// 如果消息是响应，则根据CallID、FromTag和ToTag获取
+	// 如果没有找到，且不是in-dialog请求，则创建新的，如果是in-dialog请求则返回nil
+	GetorCreateDialogByMessage(msg SipMessage) Dialog
 }
 
 type DialogListener interface {
@@ -42,15 +84,13 @@ type Transaction interface {
 	ID() string
 	Type() TransactionType
 	State() TransactionState
-	SetState(state TransactionState)
-	DialogID() string
+	UA() UAType
 	Request() SipRequest
 	LastResponse() SipResponse
 	CreatedAt() int64
 	UpdatedAt() int64
-	Direction() UADirection // 新增：UAC/UAS
-	IsTerminated() bool     // 新增
-	Error() error           // 新增
+	IsTerminated() bool // 新增
+	Error() error       // 新增
 }
 
 type TransactionListener interface {
@@ -62,14 +102,31 @@ type TransactionListener interface {
 }
 
 type TransactionManager interface {
+	// 创建新的Transaction
+	// 如果已存在，则返回现有的Transaction
+	// 如果不存在，则创建新的Transaction并返回
 	CreateTransaction(dialog Dialog, request SipRequest) Transaction
+	// 获取Transaction
+	// 如果没有找到，则直接返回nil
+	// 如果有多个Transaction，则返回第一个找到的
 	GetTransaction(id string) Transaction
+	// 更新Transaction状态
 	UpdateTransaction(transaction Transaction) error
+	// 删除Transaction
 	DeleteTransaction(id string) error
+	// 添加监听器
 	addListener(name string, listener TransactionListener)
+	// 移除监听器
 	removeListener(name string, listener TransactionListener)
+	// 获取所有Transaction
 	GetTransactions() []Transaction
+	// 根据Dialog ID获取所有Transaction
+	// 如果没有找到，则直接返回空切片
 	GetTransactionsByDialog(dialogID string) []Transaction
+	// 根据消息获取Transaction，使用消息Via头的CallID+Cseq+branch构建key获取，
+	// 如果是请求且没找到则创建新的，
+	// 如果是响应且没找到则返回nil
+	GetOrCreateTransactionByMessage(msg SipMessage) Transaction
 }
 
 type TransactionType int
@@ -106,10 +163,10 @@ const (
 	DialogStateTerminated
 )
 
-type UA int
+type UAType int
 
 const (
-	UAClient UA = iota
+	UAClient UAType = iota
 	UAServer
 )
 
@@ -176,18 +233,10 @@ func (s NonInviteTransactionState) String() string {
 	}
 }
 
-type UADirection int
-
-const (
-	UACDirection UADirection = iota
-	UASDirection
-)
-
 type DialogEvent struct {
 	Type      EventType
 	Dialog    Dialog
 	Timestamp int64
-	Reason    string
 }
 
 type TransactionEvent struct {
@@ -196,12 +245,3 @@ type TransactionEvent struct {
 	Timestamp   int64
 	Error       error
 }
-
-type SessionType int
-
-const (
-	SessionTypeInvite SessionType = iota
-	SessionTypeSubscribe
-	SessionTypeNotify
-	// ...
-)
