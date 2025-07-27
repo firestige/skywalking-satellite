@@ -16,9 +16,8 @@ type SipMessage interface {
 	Headers() map[string]string
 	CallID() string
 	CSeq() string
-	FromTag() string
-	ToTag() string
-	SetToTag(tag string)
+	From() string
+	To() string
 	ViaBranch() string
 	IsRequest() bool
 	isAck() bool
@@ -37,6 +36,12 @@ type SipRequest interface {
 type SipResponse interface {
 	Status() int
 	StatusLine() string
+	Is1XX() bool
+	Is2XX() bool
+	Is3XX() bool
+	Is4XX() bool
+	Is5XX() bool
+	Is6XX() bool
 	SipMessage
 	SipContent
 }
@@ -50,20 +55,21 @@ type Headers interface {
 type Method string
 
 const (
-	Invite    Method = "INVITE"
-	Ack       Method = "ACK"
-	Options   Method = "OPTIONS"
-	Bye       Method = "BYE"
-	Cancel    Method = "CANCEL"
-	Register  Method = "REGISTER"
-	Prack     Method = "PRACK"     // RFC 3262
-	Subscribe Method = "SUBSCRIBE" // RFC 3265
-	Notify    Method = "NOTIFY"    // RFC 3265
-	Update    Method = "UPDATE"    // RFC 3311
-	Refer     Method = "REFER"     // RFC 3515
-	Message   Method = "MESSAGE"   // RFC 3428
-	Info      Method = "INFO"      // RFC 2976
-	Publish   Method = "PUBLISH"   // RFC 3903
+	MethodUnknown Method = "UNKNOWN"
+	Invite        Method = "INVITE"
+	Ack           Method = "ACK"
+	Options       Method = "OPTIONS"
+	Bye           Method = "BYE"
+	Cancel        Method = "CANCEL"
+	Register      Method = "REGISTER"
+	Prack         Method = "PRACK"     // RFC 3262
+	Subscribe     Method = "SUBSCRIBE" // RFC 3265
+	Notify        Method = "NOTIFY"    // RFC 3265
+	Update        Method = "UPDATE"    // RFC 3311
+	Refer         Method = "REFER"     // RFC 3515
+	Message       Method = "MESSAGE"   // RFC 3428
+	Info          Method = "INFO"      // RFC 2976
+	Publish       Method = "PUBLISH"   // RFC 3903
 )
 
 type StatusCode int

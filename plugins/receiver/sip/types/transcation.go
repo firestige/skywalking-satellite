@@ -1,15 +1,18 @@
 package types
 
+import "fmt"
+
 type Session interface {
 	ID() string
 	Dialogs() map[string]Dialog
 	SessionType() SessionType
+	UAType() UAType
 	CreateAt() int64
 	UpdatedAt() int64
 	AddDialog(dialog Dialog)
 	RemoveDialog(dialogID string)
 	GetDialog(dialogID string) Dialog
-	GetOrCreateDialogIfAbsent(msg SipMessage) Dialog
+	GetOrCreateDialogIfAbsent(msg SipMessage) (Dialog, error)
 	Metadatas() map[string]interface{}
 	SetMetadata(key string, value interface{})
 	GetMetadata(key string) (interface{}, bool)
@@ -18,7 +21,8 @@ type Session interface {
 type SessionType int
 
 const (
-	SessionTypeInvite SessionType = iota
+	SessionTypeUnknown SessionType = iota
+	SessionTypeInvite
 	SessionTypeSubscribe
 	SessionTypeNotify
 	// ...
@@ -43,6 +47,8 @@ type Dialog interface {
 	RemoteURI() string
 	CreatedAt() int64
 	UpdatedAt() int64
+	GetOrCreateTransactionIfAbsent(msg SipMessage) (Transaction, error)
+	ChangeState(from, to DialogState) error
 }
 
 type DialogManager interface {
@@ -90,7 +96,9 @@ type Transaction interface {
 	CreatedAt() int64
 	UpdatedAt() int64
 	IsTerminated() bool // 新增
-	Error() error       // 新增
+	Error() error
+	// 变更状态                            // 新增
+	ChangeState(from, to TransactionState) error // 新增
 }
 
 type TransactionListener interface {
@@ -166,7 +174,8 @@ const (
 type UAType int
 
 const (
-	UAClient UAType = iota
+	UAUnknown UAType = iota
+	UAClient
 	UAServer
 )
 
@@ -233,15 +242,15 @@ func (s NonInviteTransactionState) String() string {
 	}
 }
 
-type DialogEvent struct {
+type SessionEvent struct {
 	Type      EventType
-	Dialog    Dialog
+	Session   Session
 	Timestamp int64
+	Error     error // 错误信息，如果有的话
 }
 
-type TransactionEvent struct {
-	Type        EventType
-	Transaction Transaction
-	Timestamp   int64
-	Error       error
-}
+var (
+	ErrTransactionNotFound     = fmt.Errorf("transaction not found")
+	ErrTransactionExists       = fmt.Errorf("transaction already exists")
+	ErrInvalidTransactionState = fmt.Errorf("invalid transaction state")
+)

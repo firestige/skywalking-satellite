@@ -15,18 +15,19 @@ type transaction struct {
 	ua        types.UAType
 	request   types.SipRequest
 	response  types.SipResponse
-	err       error // 错误信息，如果有的话
+	err       error   // 错误信息，如果有的话
+	dialog    *dialog // 关联的会话
 }
 
-func NewTransaction(ua types.UAType, request types.SipRequest) *transaction {
+func NewTransaction(dialog *dialog, request types.SipRequest) *transaction {
 	id := buildTransactionID(request, false)
 	txType := createTransactionType(request)
-	state := newTransactionState(txType, ua)
+	state := newTransactionState(txType, dialog.UA())
 	return &transaction{
 		id:        id,
 		txType:    txType,
 		txState:   state,
-		ua:        ua,
+		ua:        dialog.UA(),
 		createdAt: time.Now().Unix(),
 		updatedAt: time.Now().Unix(),
 		request:   request,

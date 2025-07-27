@@ -54,7 +54,13 @@ type Server struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	running bool
-	mu      sync.RWMutex
+	mu      *sync.RWMutex
+}
+
+func NewServer() *Server {
+	return &Server{
+		mu: &sync.RWMutex{},
+	}
 }
 
 func (s *Server) Name() string {
