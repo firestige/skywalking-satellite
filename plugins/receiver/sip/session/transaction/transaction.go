@@ -1,5 +1,9 @@
 package transaction
 
+import (
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
+)
+
 type TimerName string
 
 const (
@@ -63,11 +67,6 @@ const (
 	T4 TimerSpan = 5000 // 毫秒，消息传输最大延迟
 )
 
-type Transaction interface {
-	StartTimer(TimerName, TimerSpan)
-	CancelTimer(TimerName)
-}
-
 // TransactionEvent 定义所有可能的事件
 type TransactionEvent int
 
@@ -87,3 +86,30 @@ const (
 	EventTimerH                                 // INVITE事务UAS侧，等待ACK的超时定时器（RFC 3261 17.2.1）
 	EventTimerI                                 // INVITE事务UAS侧，收到ACK后等待终结的定时器（RFC 3261 17.2.1）
 )
+
+func convertFrom(event *types.SipEvent) TransactionEvent {
+	switch event.Type {
+	case types.EventSendRequest:
+		return EventSendRequest
+	case types.EventReceiveRequest:
+		return EventReceiveRequest
+	case types.EventSendProvisionalResponse:
+		return EventSend1xx
+	case types.EventSend2xxResponse:
+		return EventSendFinal
+	case types.EventReceiveProvisionalResponse:
+		return EventReceive1xx
+	case types.EventReceive2xxResponse:
+		return EventReceive2xx
+	case types.EventReceiveNon2xxFinalResponse:
+		return EventReceiveFinal
+	default:
+		return -1 // 未知事件
+	}
+}
+
+type Transaction interface {
+	types.Transaction
+	StartTimer(TimerName, TimerSpan)
+	CancelTimer(TimerName)
+}

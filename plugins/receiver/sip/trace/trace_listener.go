@@ -33,13 +33,14 @@ func (l *TraceListener) OnRequestReceived(req types.SipRequest) {
 func (l *TraceListener) initContext(req types.SipRequest, uaType types.UAType) {
 	switch req.Method() {
 	// TODO 只处理特定的SIP方法，后续应该做成可配置的
-	case types.Invite, types.Register, types.Options:
+	case types.MethodInvite, types.MethodRegister, types.MethodOptions:
 		// 首先根据提取TraceID的策略处理请求
 		traceID := GetTraceIDFromRequest(req)
 		ctx, exists := l.manager.GetTraceContextByTraceID(traceID)
 		if exists {
 			// 首个请求不应该有TraceContext，需要处理异常
-			fmt.Errorf("trace context already exists for trace ID %s", traceID)
+			err := fmt.Errorf("trace context already exists for trace ID %s", traceID)
+			log.Logger.WithError(err).Errorf("failed to inital segment: %s", traceID)
 			return
 		}
 		ctx = l.manager.CreateTraceContext(traceID, req.CreatedAt())
@@ -59,7 +60,7 @@ func (l *TraceListener) OnDialogCreated(dialog types.Dialog) {
 		log.Logger.Errorf("trace context not found for dialog with Call-ID: %s", dialog.CallID())
 		return
 	}
-	ctx.CreateNewSpan(dialog.ID(), dialog.CallID(), string(types.Invite), dialog.RemoteURI(), dialog.CreatedAt(), dialog.Metadatas())
+	ctx.CreateNewSpan(dialog.ID(), dialog.CallID(), string(types.MethodInvite), dialog.RemoteURI(), dialog.CreatedAt(), dialog.Metadatas())
 }
 
 func (l *TraceListener) OnDialogStateChanged(dialog types.Dialog) {

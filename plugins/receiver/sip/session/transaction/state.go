@@ -2,10 +2,13 @@ package transaction
 
 import (
 	"fmt"
+
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 )
 
 type TransactionState interface {
-	HandleEvent(ctx *TransactionContext, event TransactionEvent) (TransactionState, error)
+	HandleMessage(ctx *TransactionContext, msg types.SipMessage) (TransactionState, error)
 	Enter(ctx *TransactionContext)
 	Exit(ctx *TransactionContext)
 }
@@ -15,21 +18,28 @@ type TransactionState interface {
 type NonInviteTryingState struct{}
 
 func (s *NonInviteTryingState) Enter(ctx *TransactionContext) {
-	ctx.tx.StartTimer(TimerE, T1)
+	ctx.StartTimer(TimerE, T1)
 }
 
-func (s *NonInviteTryingState) HandleEvent(ctx *TransactionContext, event TransactionEvent) (TransactionState, error) {
-	switch event {
-	case EventSendRequest, EventReceiveRequest:
-		// 保持Trying
-		return s, nil
-	case EventReceive1xx, EventSend1xx:
-		return &NonInviteProceedingState{}, nil
-	case EventReceiveFinal, EventSendFinal:
-		return &NonInviteCompletedState{}, nil
-	default:
-		return nil, fmt.Errorf("unexpected event %v in NonInviteTryingState", event)
+func (s *NonInviteTryingState) HandleMessage(ctx *TransactionContext, msg types.SipMessage) (TransactionState, error) {
+	if req, ok := msg.(types.SipRequest); ok {
+		if req.Method() == types.MethodInvite {
+			return s, nil // 保持Trying状态
+		}
 	}
+	if resp, ok := msg.(types.SipResponse); ok {
+		if utils.IsProvisionalResponse(resp) {
+			// 1xx响应，进入Proceeding
+			return &NonInviteProceedingState{}, nil
+		}
+		if utils.IsFinalResponse(resp) {
+			// 最终响应，进入Complete
+			next := &NonInviteCompletedState{}
+			return next, nil
+		}
+	}
+	// 其他响应，保持Trying
+	return s, nil
 }
 
 func (s *NonInviteTryingState) Exit(ctx *TransactionContext) {
@@ -39,21 +49,21 @@ func (s *NonInviteTryingState) Exit(ctx *TransactionContext) {
 type NonInviteProceedingState struct{}
 
 func (s *NonInviteProceedingState) Enter(ctx *TransactionContext) {
-	ctx.tx.StartTimer(TimerF, 64*T1)
+	ctx.StartTimer(TimerF, 64*T1)
 }
 
-func (s *NonInviteProceedingState) HandleEvent(ctx *TransactionContext, event TransactionEvent) (TransactionState, error) {
-	switch event {
-	case EventReceive1xx, EventSend1xx:
-		// 保持Proceeding
-		return s, nil
-	case EventReceiveFinal, EventSendFinal:
-		return &NonInviteCompletedState{}, nil
-	case EventTimerJ:
-		return &NonInviteTerminatedState{}, nil
-	default:
-		return nil, fmt.Errorf("unexpected event %v in NonInviteProceedingState", event)
+func (s *NonInviteProceedingState) HandleMessage(ctx *TransactionContext, msg types.SipMessage) (TransactionState, error) {
+	if resp, ok := msg.(types.SipResponse); ok {
+		if utils.IsFinalResponse(resp) {
+			// 最终响应，进入Completed
+			next := &NonInviteCompletedState{}
+			return next, nil
+		}
 	}
+	// TODO 注意补齐响应超时事件
+	// case EventTimerJ:
+	// 	return &NonInviteTerminatedState{}, nil
+	return s, nil
 }
 
 func (s *NonInviteProceedingState) Exit(ctx *TransactionContext) {
@@ -65,21 +75,23 @@ type NonInviteCompletedState struct{}
 func (s *NonInviteCompletedState) Enter(ctx *TransactionContext) {
 	// 通常在UAS侧启动TimerJ，UAC侧启动TimerK
 	// 这里假设都启动TimerJ，具体可根据角色区分
-	ctx.tx.StartTimer(TimerJ, 64*T1)
+	ctx.StartTimer(TimerJ, 64*T1)
 }
 
-func (s *NonInviteCompletedState) HandleEvent(ctx *TransactionContext, event TransactionEvent) (TransactionState, error) {
-	switch event {
-	case EventTimerJ, EventTimerK:
-		return &NonInviteTerminatedState{}, nil
-	default:
-		return nil, fmt.Errorf("unexpected event %v in NonInviteCompletedState", event)
-	}
+func (s *NonInviteCompletedState) HandleMessage(ctx *TransactionContext, msg types.SipMessage) (TransactionState, error) {
+	// TODO这里只响应计时器超时事件
+	// switch event {
+	// case EventTimerJ, EventTimerK:
+	// 	return &NonInviteTerminatedState{}, nil
+	// default:
+	// 	return nil, fmt.Errorf("unexpected event %v in NonInviteCompletedState", event)
+	// }
+	return nil, fmt.Errorf("unexpected message type %T in NonInviteCompletedState", msg)
 }
 
 func (s *NonInviteCompletedState) Exit(ctx *TransactionContext) {
-	ctx.tx.CancelTimer(TimerF)
-	ctx.tx.CancelTimer(TimerK)
+	ctx.CancelTimer(TimerF)
+	ctx.CancelTimer(TimerK)
 }
 
 type NonInviteTerminatedState struct{}
@@ -88,7 +100,7 @@ func (s *NonInviteTerminatedState) Enter(ctx *TransactionContext) {
 	// 事务终止，无需操作
 }
 
-func (s *NonInviteTerminatedState) HandleEvent(ctx *TransactionContext, event TransactionEvent) (TransactionState, error) {
+func (s *NonInviteTerminatedState) HandleMessage(ctx *TransactionContext, msg types.SipMessage) (TransactionState, error) {
 	return nil, fmt.Errorf("transaction already terminated")
 }
 
@@ -99,91 +111,103 @@ func (s *NonInviteTerminatedState) Exit(ctx *TransactionContext) {}
 type InviteCallingState struct{}
 
 func (s *InviteCallingState) Enter(ctx *TransactionContext) {
-	ctx.tx.StartTimer(TimerA, T1)
-	ctx.tx.StartTimer(TimerB, 64*T1)
+	ctx.StartTimer(TimerA, T1)
+	ctx.StartTimer(TimerB, 64*T1)
 }
 
-func (s *InviteCallingState) HandleEvent(ctx *TransactionContext, event TransactionEvent) (TransactionState, error) {
-	switch event {
-	case EventSendRequest:
+func (s *InviteCallingState) HandleMessage(ctx *TransactionContext, msg types.SipMessage) (TransactionState, error) {
+	if _, ok := msg.(types.SipRequest); ok {
 		return s, nil
-	case EventReceive1xx, EventSend1xx:
-		return &InviteProceedingState{}, nil
-	case EventReceiveFinal, EventSendFinal:
-		return &InviteCompletedState{}, nil
-	case EventReceive2xx:
-		return &InviteTerminatedState{}, nil
-	default:
-		return nil, fmt.Errorf("unexpected event %v in InviteCallingState", event)
 	}
+	if resp, ok := msg.(types.SipResponse); ok {
+		if utils.IsProvisionalResponse(resp) {
+			// 收到/发出1xx响应，进入Proceeding
+			return &InviteProceedingState{}, nil
+		}
+		if utils.Is2XXResponse(resp) {
+			// 收到/发出最终响应，进入Terminated
+			return &InviteTerminatedState{}, nil
+		}
+		if utils.IsNon2XXFinalResponse(resp) {
+			// 收到/发出非2xx最终响应，进入Completed
+			return &InviteCompletedState{}, nil
+		}
+	}
+	return nil, fmt.Errorf("unexpected message type %T in InviteCallingState", msg)
 }
 
 func (s *InviteCallingState) Exit(ctx *TransactionContext) {
-	ctx.tx.CancelTimer(TimerA)
-	ctx.tx.CancelTimer(TimerB)
+	ctx.CancelTimer(TimerA)
+	ctx.CancelTimer(TimerB)
 }
 
 type InviteProceedingState struct{}
 
 func (s *InviteProceedingState) Enter(ctx *TransactionContext) {
-	ctx.tx.StartTimer(TimerC, 64*T1)
+	ctx.StartTimer(TimerC, 64*T1)
 }
 
-func (s *InviteProceedingState) HandleEvent(ctx *TransactionContext, event TransactionEvent) (TransactionState, error) {
-	switch event {
-	case EventReceive1xx, EventSend1xx:
-		return s, nil
-	case EventReceiveFinal, EventSendFinal:
-		return &InviteCompletedState{}, nil
-	case EventReceive2xx:
-		return &InviteTerminatedState{}, nil
-	default:
-		return nil, fmt.Errorf("unexpected event %v in InviteProceedingState", event)
+func (s *InviteProceedingState) HandleMessage(ctx *TransactionContext, msg types.SipMessage) (TransactionState, error) {
+	if resp, ok := msg.(types.SipResponse); ok {
+		if utils.IsProvisionalResponse(resp) {
+			// 收到1xx响应，保持Proceeding
+			return s, nil
+		}
+		if utils.Is2XXResponse(resp) {
+			// 收到2xx响应，进入Terminated
+			return &InviteTerminatedState{}, nil
+		}
+		if utils.IsNon2XXFinalResponse(resp) {
+			// 收到非2xx最终响应，进入Terminated
+			return &InviteCompletedState{}, nil
+		}
 	}
+	return nil, fmt.Errorf("unexpected message type %T in InviteProceedingState", msg)
 }
 
 func (s *InviteProceedingState) Exit(ctx *TransactionContext) {
-	ctx.tx.CancelTimer(TimerC)
+	ctx.CancelTimer(TimerC)
 }
 
 type InviteCompletedState struct{}
 
 func (s *InviteCompletedState) Enter(ctx *TransactionContext) {
-	ctx.tx.StartTimer(TimerD, 64*T1)
+	ctx.StartTimer(TimerD, 64*T1)
 }
 
-func (s *InviteCompletedState) HandleEvent(ctx *TransactionContext, event TransactionEvent) (TransactionState, error) {
-	switch event {
-	case EventSendACK, EventReceiveACK:
+func (s *InviteCompletedState) HandleMessage(ctx *TransactionContext, msg types.SipMessage) (TransactionState, error) {
+	if req, ok := msg.(types.SipRequest); ok && req.Method() == types.MethodAck {
 		return &InviteConfirmedState{}, nil
-	case EventTimerI:
-		return &InviteTerminatedState{}, nil
-	default:
-		return nil, fmt.Errorf("unexpected event %v in InviteCompletedState", event)
 	}
+	// TODO 注意补齐响应超时事件
+	// case EventTimerI:
+	// 	return &InviteTerminatedState{}, nil
+	return nil, fmt.Errorf("unexpected message type %T in InviteCompletedState", msg)
 }
 
 func (s *InviteCompletedState) Exit(ctx *TransactionContext) {
-	ctx.tx.CancelTimer(TimerD)
+	ctx.CancelTimer(TimerD)
 }
 
 type InviteConfirmedState struct{}
 
 func (s *InviteConfirmedState) Enter(ctx *TransactionContext) {
-	ctx.tx.StartTimer(TimerI, T1)
+	ctx.StartTimer(TimerI, T1)
 }
 
-func (s *InviteConfirmedState) HandleEvent(ctx *TransactionContext, event TransactionEvent) (TransactionState, error) {
-	switch event {
-	case EventTimerI:
-		return &InviteTerminatedState{}, nil
-	default:
-		return nil, fmt.Errorf("unexpected event %v in InviteConfirmedState", event)
-	}
+func (s *InviteConfirmedState) HandleMessage(ctx *TransactionContext, msg types.SipMessage) (TransactionState, error) {
+	// TODO这里只响应计时器超时事件
+	// switch event {
+	// case EventTimerI:
+	// 	return &InviteTerminatedState{}, nil
+	// default:
+	// 	return nil, fmt.Errorf("unexpected event %v in InviteConfirmedState", event)
+	// }
+	return nil, fmt.Errorf("unexpected message type %T in InviteConfirmedState", msg)
 }
 
 func (s *InviteConfirmedState) Exit(ctx *TransactionContext) {
-	ctx.tx.CancelTimer(TimerI)
+	ctx.CancelTimer(TimerI)
 }
 
 type InviteTerminatedState struct{}
@@ -192,7 +216,7 @@ func (s *InviteTerminatedState) Enter(ctx *TransactionContext) {
 	// 事务终止，无需操作
 }
 
-func (s *InviteTerminatedState) HandleEvent(ctx *TransactionContext, event TransactionEvent) (TransactionState, error) {
+func (s *InviteTerminatedState) HandleMessage(ctx *TransactionContext, msg types.SipMessage) (TransactionState, error) {
 	return nil, fmt.Errorf("transaction already terminated")
 }
 

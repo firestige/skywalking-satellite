@@ -33,11 +33,10 @@ const (
 	EventTransactionTimeout      // Transaction 超时
 )
 
-type SipEvent interface {
-	// Type 返回事件类型
-	Type() EventType
-	// String 返回事件的字符串表示
-	String() string
-	// Context 返回事件的上下文信息
-	context() map[string]interface{}
+type SipEvent struct {
+	Type      EventType              // Type 返回事件类型
+	Name      string                 // String 返回事件的字符串表示
+	Message   SipMessage             // Message 返回与事件相关的 SIP 消息
+	Context   map[string]interface{} // Context 返回事件的上下文信息
+	Timestamp int64                  // 事件发生的时间戳
 }

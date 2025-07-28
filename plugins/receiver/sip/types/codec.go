@@ -56,21 +56,21 @@ type Headers interface {
 type Method string
 
 const (
-	MethodUnknown Method = "UNKNOWN" // 未知方法,一般是遇到了定义之外的SIP方法
-	Invite        Method = "INVITE"
-	Ack           Method = "ACK"
-	Options       Method = "OPTIONS"
-	Bye           Method = "BYE"
-	Cancel        Method = "CANCEL"
-	Register      Method = "REGISTER"
-	Prack         Method = "PRACK"     // RFC 3262
-	Subscribe     Method = "SUBSCRIBE" // RFC 3265
-	Notify        Method = "NOTIFY"    // RFC 3265
-	Update        Method = "UPDATE"    // RFC 3311
-	Refer         Method = "REFER"     // RFC 3515
-	Message       Method = "MESSAGE"   // RFC 3428
-	Info          Method = "INFO"      // RFC 2976
-	Publish       Method = "PUBLISH"   // RFC 3903
+	MethodUnknown   Method = "UNKNOWN" // 未知方法,一般是遇到了定义之外的SIP方法
+	MethodInvite    Method = "INVITE"
+	MethodAck       Method = "ACK"
+	MethodOptions   Method = "OPTIONS"
+	MethodBye       Method = "BYE"
+	MethodCancel    Method = "CANCEL"
+	MethodRegister  Method = "REGISTER"
+	MethodPrack     Method = "PRACK"     // RFC 3262
+	MethodSubscribe Method = "SUBSCRIBE" // RFC 3265
+	MethodNotify    Method = "NOTIFY"    // RFC 3265
+	MethodUpdate    Method = "UPDATE"    // RFC 3311
+	MethodRefer     Method = "REFER"     // RFC 3515
+	MethodMessage   Method = "MESSAGE"   // RFC 3428
+	MethodInfo      Method = "INFO"      // RFC 2976
+	MethodPublish   Method = "PUBLISH"   // RFC 3903
 )
 
 type StatusCode int

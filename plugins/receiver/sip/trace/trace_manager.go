@@ -13,7 +13,7 @@ import (
 
 type TraceContext struct {
 	traceID   string
-	idMapping []string // index spanID, element dialog ID or transaction ID
+	idMapping []string // 序号是span ID，内容是Dialog ID或者Transaction ID，特殊的，idMapping[0]是Call-ID
 	segment   *agent.SegmentObject
 
 	isInitalized bool // 是否已经初始化
@@ -83,8 +83,8 @@ func (ctx *TraceContext) initSegmentObject(req types.SipRequest, uaType types.UA
 		ctx.buildRootSpan(req.CallID(), req.MethodAsString(), remoteURI, req.CreatedAt())
 	default:
 		// 未知UA类型，无法初始化Segment
-		err := fmt.Errorf("unknown UA type: %s", uaType)
-		log.Logger.WithError(err).Debug("failed to inital segment: %s", uaType)
+		err := fmt.Errorf("unknown UA type: %v", uaType)
+		log.Logger.WithError(err).Debugf("failed to inital segment: %v", uaType)
 	}
 	ctx.isInitalized = true
 }
@@ -125,6 +125,7 @@ func (ctx *TraceContext) FinishExistSpan(txID string, isError bool, endTime int6
 	log.Logger.Errorf("span with ID %s not found in trace context %s", txID, ctx.traceID)
 }
 
+// 根Span是一个虚拟的Span，通常用于表示当前服务抓包的起点，主要用于解决in-dialog对话时出现多个fork dialog的情况，以及fs桥接会话时出现多条腿的情况。
 func (ctx *TraceContext) buildRootSpan(callID string, method string, remoteURI string, startTime int64) {
 	// 外呼场景FS作为下游只有上游组件获取traceID，所以根节点的ref肯定不为空
 	ref := sniffdata.NewSegmentReferenceBuilder().
@@ -135,9 +136,9 @@ func (ctx *TraceContext) buildRootSpan(callID string, method string, remoteURI s
 		WithParentServiceInstance(""). //  TODO 上下文暂时不支持，用空字符串替代，由OAP修改
 		WithParentEndpoint("").        //  TODO 上下文暂时不支持，用空字符串替代，由OAP修改
 		Build()
-	// 创建根span
+	// 记录callID到idMapping中，方便后续查找
 	ctx.idMapping = append(ctx.idMapping, callID)
-	ctx.builder.WithSpanBuilder().
+	span := sniffdata.NewSpanBuilder().
 		WithSpanId(0).        // 根span的ID通常为0
 		WithParentSpanId(-1). // 根span没有父span
 		WithStartTime(startTime).
@@ -146,7 +147,8 @@ func (ctx *TraceContext) buildRootSpan(callID string, method string, remoteURI s
 		WithSpanLayer(agent.SpanLayer_Unknown). // 自定义场景在protobuf中未定义，统统为unknown
 		WithPeer(remoteURI).                    // 使用remoteURI作为对端地址
 		WithRef(ref).
-		Finish()
+		Build()
+	ctx.segment.Spans = append(ctx.segment.Spans, span)
 }
 
 // 使用Dialog ID从idMapping中寻找parentID

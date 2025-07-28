@@ -71,32 +71,82 @@ func ExtractMethodFromCseq(cseq string) types.Method {
 	method := strings.ToUpper(parts[1])
 	switch method {
 	case "INVITE":
-		return types.Invite
+		return types.MethodInvite
 	case "ACK":
-		return types.Ack
+		return types.MethodAck
 	case "INFO":
-		return types.Info
+		return types.MethodInfo
 	case "BYE":
-		return types.Bye
+		return types.MethodBye
 	case "CANCEL":
-		return types.Cancel
+		return types.MethodCancel
 	case "MESSAGE":
-		return types.Message
+		return types.MethodMessage
 	case "REFER":
-		return types.Refer
+		return types.MethodRefer
 	case "PRACK":
-		return types.Prack
+		return types.MethodPrack
 	case "UPDATE":
-		return types.Update
+		return types.MethodUpdate
 	case "OPTIONS":
-		return types.Options
+		return types.MethodOptions
 	case "REGISTER":
-		return types.Register
+		return types.MethodRegister
 	case "SUBSCRIBE":
-		return types.Subscribe
+		return types.MethodSubscribe
 	case "NOTIFY":
-		return types.Notify
+		return types.MethodNotify
 	default:
 		return types.MethodUnknown
 	}
+}
+
+func ParseUAType(msg types.SipMessage) types.UAType {
+	// 利用msg的Direction和请求与响应来判断UA类型
+	// 对UAS而言inbound收到来自外部的请求，outbound发送到外部的响应
+	// 对UAC而言inbound收到来自外部的响应，outbound发送到外部的请求
+	// 特殊的情况是in-dialog消息,主要是Info/Bye/CANCEL,无论UAC还是UAS都可以发起,但此时不应该创建会话
+	if msg.Direction() == types.DirectionInbound {
+		if msg.IsRequest() {
+			return types.UAServer
+		}
+		return types.UAClient
+	}
+	if msg.Direction() == types.DirectionOutbound {
+		if msg.IsRequest() {
+			return types.UAClient
+		}
+		return types.UAServer
+	}
+	return types.UAUnknown
+}
+
+func IsProvisionalResponse(resp types.SipResponse) bool {
+	status := resp.Status()
+	return status >= 100 && status < 200
+}
+
+func IsFinalResponse(resp types.SipResponse) bool {
+	status := resp.Status()
+	return status >= 200 && status < 700
+}
+
+func Is2XXResponse(resp types.SipResponse) bool {
+	status := resp.Status()
+	return status >= 200 && status < 300
+}
+
+func IsNon2XXFinalResponse(resp types.SipResponse) bool {
+	status := resp.Status()
+	return status >= 300 && status < 700
+}
+
+func IsRedirectResponse(resp types.SipResponse) bool {
+	status := resp.Status()
+	return status >= 300 && status < 400
+}
+
+func IsErrorResponse(resp types.SipResponse) bool {
+	status := resp.Status()
+	return status >= 400 && status < 600
 }
