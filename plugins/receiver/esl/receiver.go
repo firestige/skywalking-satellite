@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
-	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	module "github.com/apache/skywalking-satellite/internal/satellite/module/api"
 	forwarder "github.com/apache/skywalking-satellite/plugins/forwarder/api"
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativelog"
@@ -13,7 +12,6 @@ import (
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 	"github.com/google/gopacket/layers"
-	"google.golang.org/protobuf/proto"
 	common "skywalking.apache.org/repo/goapi/collect/common/v3"
 	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
 	logging "skywalking.apache.org/repo/goapi/collect/logging/v3"
@@ -64,44 +62,45 @@ func (r *Receiver) RegisterSyncInvoker(_ module.SyncInvoker) {
 }
 
 func (r *Receiver) packetHandler(data *types.RawFrameData) error {
-	parser := &ESLParser{}
-	event, err := parser.ParseMessage(data.Data)
-	if err != nil {
-		log.Logger.Error("failed to parse ESL message:", err)
-		return nil
-	}
+	// parser := &ESLParser{}
 
-	// Build segment for tracing
-	segment := buildSegment(data, event)
-	if segment != nil {
-		traceByte, _ := proto.Marshal(segment)
-		traceData := &v1.SniffData{
-			Name:   "esl-capture",
-			Type:   v1.SniffType_TracingType,
-			Remote: true,
-			Data: &v1.SniffData_Segment{
-				Segment: traceByte,
-			},
-		}
-		r.OutputChannel <- traceData
-	}
+	// event, err := parser.ParseMessage(data.Data)
+	// if err != nil {
+	// 	log.Logger.Error("failed to parse ESL message:", err)
+	// 	return nil
+	// }
 
-	// Build log data
-	logData := buildLogData(data, event)
-	if logData != nil {
-		logByte, _ := proto.Marshal(logData)
-		logSniffData := &v1.SniffData{
-			Name:   "esl-log",
-			Type:   v1.SniffType_Logging,
-			Remote: true,
-			Data: &v1.SniffData_LogList{
-				LogList: &v1.BatchLogList{
-					Logs: [][]byte{logByte},
-				},
-			},
-		}
-		r.OutputChannel <- logSniffData
-	}
+	// // Build segment for tracing
+	// segment := buildSegment(data, event)
+	// if segment != nil {
+	// 	traceByte, _ := proto.Marshal(segment)
+	// 	traceData := &v1.SniffData{
+	// 		Name:   "esl-capture",
+	// 		Type:   v1.SniffType_TracingType,
+	// 		Remote: true,
+	// 		Data: &v1.SniffData_Segment{
+	// 			Segment: traceByte,
+	// 		},
+	// 	}
+	// 	r.OutputChannel <- traceData
+	// }
+
+	// // Build log data
+	// logData := buildLogData(data, event)
+	// if logData != nil {
+	// 	logByte, _ := proto.Marshal(logData)
+	// 	logSniffData := &v1.SniffData{
+	// 		Name:   "esl-log",
+	// 		Type:   v1.SniffType_Logging,
+	// 		Remote: true,
+	// 		Data: &v1.SniffData_LogList{
+	// 			LogList: &v1.BatchLogList{
+	// 				Logs: [][]byte{logByte},
+	// 			},
+	// 		},
+	// 	}
+	// 	r.OutputChannel <- logSniffData
+	// }
 
 	return nil
 }

@@ -9,9 +9,16 @@ import (
 
 func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 	// 解析SIP消息
-	goSipMsg, err := r.sipParser.Parse(frame.Data)
+	p := frame.Packet
+	sipLayer := p.Layer(layers.LayerTypeSIP)
+	if sipLayer == nil {
+		log.Logger.Debug("No SIP layer found in packet, ignore")
+		return nil
+	}
+	data := sipLayer.LayerContents()
+	goSipMsg, err := r.sipParser.Parse(data)
 	if err != nil {
-		log.Logger.Debug("failed to parse SIP message:", err)
+		log.Logger.WithError(err).Debugf("failed to parse SIP message: %s", data)
 		// bad packet, ignore and continue, need statistics
 		return nil
 	}

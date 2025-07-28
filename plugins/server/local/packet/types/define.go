@@ -24,7 +24,7 @@ const (
 )
 
 type RawFrameData struct {
-	Data       []byte
+	Packet     gopacket.Packet // 原始数据包
 	Meta       map[string]string
 	Connection Connection
 	Timestamp  int64

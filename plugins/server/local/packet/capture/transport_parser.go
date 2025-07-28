@@ -21,8 +21,7 @@ func parseTransportLayers(packet gopacket.Packet, frame *types.RawFrameData) {
 	}
 
 	ip4 := ipLayer.(*layers.IPv4)
-
-	frame.Data = packet.Data()
+	frame.Packet = packet
 	frame.Timestamp = packet.Metadata().Timestamp.UnixNano()
 	frame.Meta = make(map[string]string)
 	frame.Connection = types.Connection{

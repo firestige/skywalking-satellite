@@ -78,6 +78,10 @@ func (m *sipMessage) Body() string {
 	return m.delegate.Body()
 }
 
+func (m *sipMessage) BodyAsBytes() []byte {
+	return []byte(m.delegate.Body())
+}
+
 func (m *sipMessage) IsRequest() bool {
 	return isRequest(m.delegate.StartLine())
 }
@@ -114,7 +118,11 @@ func (m *sipMessage) String() string {
 }
 
 // SipRequest interface implementations
-func (r *goSipRequest) Method() string {
+func (r *goSipRequest) Method() types.Method {
+	return r.method
+}
+
+func (r *goSipRequest) MethodAsString() string {
 	return string(r.method)
 }
 

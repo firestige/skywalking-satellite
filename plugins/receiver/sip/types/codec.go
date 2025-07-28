@@ -9,7 +9,8 @@ type SipObject interface {
 }
 
 type SipContent interface {
-	Body() []byte
+	Body() string
+	BodyAsBytes() []byte
 }
 
 type SipMessage interface {

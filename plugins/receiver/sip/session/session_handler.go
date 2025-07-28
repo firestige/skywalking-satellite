@@ -20,21 +20,31 @@ func NewSessionHandler() *SessionHandler {
 }
 
 func (sh *SessionHandler) HandleMessage(msg types.SipMessage) {
+	// 1. Dialog 处理
 	dx, exist := sh.dialogManager.GetDialogBySipMessage(msg)
-	if !exist {
-		dx = sh.dialogManager.CreateDialog(msg.(types.SipRequest))
-		if dx != nil {
-			log.Logger.Debugf("Created new dialog: %s", dx.ID())
-			dx.HandleMessage(msg)
+	if !exist && msg.IsRequest() {
+		if req, ok := msg.(types.SipRequest); ok {
+			dx = sh.dialogManager.CreateDialog(req)
+			if dx != nil {
+				log.Logger.Debugf("Created new dialog: %s", dx.ID())
+			}
 		}
 	}
+	if dx != nil {
+		dx.HandleMessage(msg)
+	}
 
+	// 2. Transaction 处理
 	tx, exist := sh.txManager.GetTransactionBySipMessage(msg)
-	if !exist {
-		tx = sh.txManager.CreateTransaction(msg.(types.SipRequest))
-		if tx != nil {
-			log.Logger.Debugf("Created new transaction: %s", tx.ID())
-			tx.HandleMessage(msg)
+	if !exist && msg.IsRequest() {
+		if req, ok := msg.(types.SipRequest); ok {
+			tx = sh.txManager.CreateTransaction(req)
+			if tx != nil {
+				log.Logger.Debugf("Created new transaction: %s", tx.ID())
+			}
 		}
+	}
+	if tx != nil {
+		tx.HandleMessage(msg)
 	}
 }

@@ -1,6 +1,8 @@
 package sip
 
 import (
+	"fmt"
+
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	module "github.com/apache/skywalking-satellite/internal/satellite/module/api"
 	forwarder "github.com/apache/skywalking-satellite/plugins/forwarder/api"
@@ -46,6 +48,7 @@ func (r *Receiver) DefaultConfig() string {
 	return `
 service_name: "SIP Service"
 service_instance: "SIP Instance"
+ports: "5060,5061" # 监听的端口列表，逗号分隔
 `
 }
 
@@ -54,8 +57,8 @@ func (r *Receiver) RegisterHandler(server interface{}) {
 	r.OutputChannel = make(chan *v1.SniffData, 1000)
 	r.sipParser = NewSipParser()
 	r.handler = session.NewSessionHandler()
-	r.Server.RegisterHandler(layers.IPProtocolTCP, r.Ports, "Sip-TCP-Handler", r.processTCPFrame)
-	r.Server.RegisterHandler(layers.IPProtocolUDP, r.Ports, "Sip-UDP-Handler", r.processUDPFrame)
+	r.Server.RegisterHandler(layers.IPProtocolTCP, r.Ports, fmt.Sprintf("%s-TCP", r.ServiceName), r.processTCPFrame)
+	r.Server.RegisterHandler(layers.IPProtocolUDP, r.Ports, fmt.Sprintf("%s-UDP", r.ServiceName), r.processUDPFrame)
 }
 
 func (r *Receiver) RegisterSyncInvoker(_ module.SyncInvoker) {

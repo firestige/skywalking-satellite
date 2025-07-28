@@ -19,6 +19,7 @@ func NewSipParser() *SipParser {
 func (p *SipParser) Parse(data []byte) (sip.Message, error) {
 	msg, err := p.delegate.ParseMessage(data)
 	if err != nil {
+		log.Logger.WithError(err).Debugf("Failed to parse SIP message: %s", data)
 		return nil, err
 	}
 	return msg, nil
