@@ -19,10 +19,3 @@ type Connection struct {
 type WithConnection interface {
 	Connection() *Connection
 }
-
-type SipSessionManager interface {
-	GetOrCreateSession(msg SipMessage) (*Session, error)
-	DoOnRemoveSession(callId string, fn func(session *Session))
-	Prepare() error
-	Stop()
-}
