@@ -57,7 +57,7 @@ type TransactionManager interface {
 	// 创建新的Transaction
 	// 如果已存在，则返回现有的Transaction
 	// 如果不存在，则创建新的Transaction并返回
-	CreateTransaction(dialog Dialog, request SipRequest) Transaction
+	CreateTransaction(request SipRequest) Transaction
 	// 获取Transaction
 	// 如果没有找到，则直接返回nil
 	// 如果有多个Transaction，则返回第一个找到的

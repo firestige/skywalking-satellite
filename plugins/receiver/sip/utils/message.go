@@ -150,3 +150,30 @@ func IsErrorResponse(resp types.SipResponse) bool {
 	status := resp.Status()
 	return status >= 400 && status < 600
 }
+
+func GetBranchFromVia(via string) string {
+	// 解析Via头部，提取branch参数
+	if start := strings.Index(via, "branch="); start != -1 {
+		start += len("branch=")
+		end := strings.Index(via[start:], ";")
+		if end == -1 {
+			end = len(via)
+		} else {
+			end += start
+		}
+		return via[start:end]
+	}
+	return ""
+}
+
+func IsByeRequest(req types.SipRequest) bool {
+	return req.Method() == types.MethodBye
+}
+
+func IsAckRequest(req types.SipRequest) bool {
+	return req.Method() == types.MethodAck
+}
+
+func IsCancelRequest(req types.SipRequest) bool {
+	return req.Method() == types.MethodCancel
+}

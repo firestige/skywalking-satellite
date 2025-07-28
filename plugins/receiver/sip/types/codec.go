@@ -21,9 +21,6 @@ type SipMessage interface {
 	To() string
 	ViaBranch() string
 	IsRequest() bool
-	isAck() bool
-	isBye() bool
-	isCancel() bool
 }
 
 type SipRequest interface {
@@ -37,12 +34,6 @@ type SipRequest interface {
 type SipResponse interface {
 	Status() int
 	StatusLine() string
-	Is1XX() bool
-	Is2XX() bool
-	Is3XX() bool
-	Is4XX() bool
-	Is5XX() bool
-	Is6XX() bool
 	SipMessage
 	SipContent
 }

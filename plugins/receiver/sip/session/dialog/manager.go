@@ -7,12 +7,12 @@ import (
 )
 
 type DialogManager struct {
-	dialogs map[string]*DialogContext // 使用 dialog-ID 作为对话标识
+	store map[string]*DialogContext // 使用 dialog-ID 作为对话标识
 }
 
 func NewDialogManager() *DialogManager {
 	return &DialogManager{
-		dialogs: make(map[string]*DialogContext),
+		store: make(map[string]*DialogContext),
 	}
 }
 
@@ -22,12 +22,12 @@ func (dm *DialogManager) CreateDialog(req types.SipRequest) *DialogContext {
 		log.Logger.WithError(err).Errorf("Failed to create dialog for request: %s", req.String())
 		return nil // 如果创建对话失败，返回 nil
 	}
-	dm.dialogs[ctx.ID()] = ctx
+	dm.store[ctx.ID()] = ctx
 	return ctx
 }
 
 func (dm *DialogManager) GetDialogByCallID(callID string) (*DialogContext, bool) {
-	ctx, exists := dm.dialogs[callID]
+	ctx, exists := dm.store[callID]
 	if !exists {
 		return nil, false // 如果对话不存在，返回 nil 和 false
 	}
@@ -36,7 +36,7 @@ func (dm *DialogManager) GetDialogByCallID(callID string) (*DialogContext, bool)
 
 func (dm *DialogManager) GetAllDialogs() []*DialogContext {
 	var allDialogs []*DialogContext
-	for _, ctx := range dm.dialogs {
+	for _, ctx := range dm.store {
 		allDialogs = append(allDialogs, ctx)
 	}
 	return allDialogs
@@ -44,10 +44,10 @@ func (dm *DialogManager) GetAllDialogs() []*DialogContext {
 
 func (dm *DialogManager) GetDialogBySipMessage(msg types.SipMessage) (*DialogContext, bool) {
 	dialogID := utils.BuildDialogID(msg, false)
-	ctx, exists := dm.dialogs[dialogID]
+	ctx, exists := dm.store[dialogID]
 	if !exists {
 		dialogID := utils.BuildDialogID(msg, true)
-		ctx, exists = dm.dialogs[dialogID]
+		ctx, exists = dm.store[dialogID]
 		if !exists {
 			return nil, false // 如果对话不存在，返回 nil 和 false
 		}

@@ -27,7 +27,7 @@ func parseTransportLayers(packet gopacket.Packet, frame *types.RawFrameData) {
 	frame.Meta = make(map[string]string)
 	frame.Connection = types.Connection{
 		SrcHost:  ip4.SrcIP.String(),
-		DestHost: ip4.DstIP.String(),
+		DstHost:  ip4.DstIP.String(),
 		Protocol: ip4.Protocol,
 	}
 

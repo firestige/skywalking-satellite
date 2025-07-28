@@ -19,35 +19,6 @@ const (
 	EventTerminate                                     // 强制终止
 )
 
-func convertFrom(event *types.SipEvent) DialogEvent {
-	switch event.Type {
-	case types.EventSendRequest:
-		return EventSendRequest
-	case types.EventReceiveRequest:
-		return EventReceiveRequest
-	case types.EventSendProvisionalResponse:
-		return EventSendProvisionalResponse
-	case types.EventReceiveProvisionalResponse:
-		return EventReceiveProvisionalResponse
-	case types.EventSend2xxResponse:
-		return EventSend2xxResponse
-	case types.EventReceive2xxResponse:
-		return EventReceive2xxResponse
-	case types.EventSendNon2xxFinalResponse:
-		return EventSendNon2xxFinalResponse
-	case types.EventReceiveNon2xxFinalResponse:
-		return EventReceiveNon2xxFinalResponse
-	case types.EventSendBYERequest:
-		return EventSendBYERequest
-	case types.EventReceiveBYERequest:
-		return EventReceiveBYERequest
-	case types.EventTerminate:
-		return EventTerminate
-	default:
-		return -1 // 未知事件
-	}
-}
-
 type Dialog interface {
 	types.Dialog
 }

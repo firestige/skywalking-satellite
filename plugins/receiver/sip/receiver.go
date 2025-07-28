@@ -3,7 +3,6 @@ package sip
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
@@ -33,10 +32,10 @@ type Receiver struct {
 	ServiceInstance string `mapstructure:"service_instance"` // 服务实例
 	Ports           string `mapstructure:"ports"`            // 监听的端口列表，逗号分隔
 
-	OutputChannel  chan *v1.SniffData
-	Server         *packet.Server
-	sipParser      *SipParser
-	sessionManager SipSessionManager
+	OutputChannel chan *v1.SniffData
+	Server        *packet.Server
+	sipParser     *SipParser
+	handler       *SessionHandler
 }
 
 func (r *Receiver) Name() string {
@@ -62,14 +61,7 @@ func (r *Receiver) RegisterHandler(server interface{}) {
 	r.Server = server.(*packet.Server)
 	r.OutputChannel = make(chan *v1.SniffData, 1000)
 	r.sipParser = NewSipParser()
-	config := &SessionManagerConfig{
-		ServiceName:     r.ServiceName,
-		ServiceInstance: r.ServiceInstance,
-
-		SessionTTL:      5 * time.Minute, // 会话过期时间
-		CleanupInterval: 1 * time.Minute, // 自动清理间隔
-	}
-	r.sessionManager = NewSessionManager(*config)
+	r.handler = NewSessionHandler()
 	r.Server.RegisterHandler(layers.IPProtocolTCP, r.Ports, "Sip-TCP-Handler", r.processTCPFrame)
 	r.Server.RegisterHandler(layers.IPProtocolUDP, r.Ports, "Sip-UDP-Handler", r.processUDPFrame)
 }

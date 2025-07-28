@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 	"github.com/ghettovoice/gosip/sip"
 )
 
@@ -11,6 +12,7 @@ type sipMessage struct {
 	delegate   sip.Message // 使用 sipgo 的 Message 接口
 	headers    map[string]string
 	connection *types.Connection // 添加连接信息
+	createAt   int64             // 创建时间戳
 }
 
 type goSipRequest struct {
@@ -23,7 +25,7 @@ type goSipResponse struct {
 	status types.StatusCode
 }
 
-func FromGoSip(msg sip.Message, conn *types.Connection) types.SipMessage {
+func FromGoSip(msg sip.Message, conn *types.Connection, timestamp int64) types.SipMessage {
 	headers := make(map[string]string)
 	for _, v := range msg.Headers() {
 		headers[v.Name()] = v.Value()
@@ -34,6 +36,7 @@ func FromGoSip(msg sip.Message, conn *types.Connection) types.SipMessage {
 				delegate:   msg,
 				headers:    headers,
 				connection: conn,
+				createAt:   timestamp,
 			},
 			method: types.Method(req.Method()),
 		}
@@ -44,6 +47,7 @@ func FromGoSip(msg sip.Message, conn *types.Connection) types.SipMessage {
 				delegate:   msg,
 				headers:    headers,
 				connection: conn,
+				createAt:   timestamp,
 			},
 			status: types.StatusCode(res.StatusCode()),
 		}
@@ -52,7 +56,7 @@ func FromGoSip(msg sip.Message, conn *types.Connection) types.SipMessage {
 }
 
 // SipMessage interface implementations
-func (m *sipMessage) CallId() string {
+func (m *sipMessage) CallID() string {
 	id, _ := m.delegate.CallID()
 	return id.Value()
 }
@@ -80,6 +84,29 @@ func (m *sipMessage) IsRequest() bool {
 
 func (m *sipMessage) Connection() *types.Connection {
 	return m.connection
+}
+
+func (m *sipMessage) CreatedAt() int64 {
+	return m.createAt
+}
+
+func (m *sipMessage) Direction() types.Direction {
+	return m.connection.Direction
+}
+
+func (m *sipMessage) From() string {
+	from, _ := m.delegate.From()
+	return from.Value()
+}
+
+func (m *sipMessage) To() string {
+	to, _ := m.delegate.To()
+	return to.Value()
+}
+
+func (m *sipMessage) ViaBranch() string {
+	via, _ := m.delegate.Via()
+	return utils.GetBranchFromVia(via.Value())
 }
 
 func (m *sipMessage) String() string {

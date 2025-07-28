@@ -8,7 +8,6 @@ const (
 )
 
 type Connection struct {
-	id        string
 	SrcIp     string
 	SrcPort   int
 	DstIp     string

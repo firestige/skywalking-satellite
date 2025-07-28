@@ -36,7 +36,7 @@ var EmptyRawFrameData = &RawFrameData{}
 type Connection struct {
 	SrcHost  string
 	SrcPort  int
-	DestHost string
+	DstHost  string
 	DstPort  int
 	Protocol layers.IPProtocol
 }
