@@ -42,6 +42,9 @@ func newNetworkCapture(config *CaptureConfig, ctx context.Context) *networkCaptu
 
 // Prepare 准备抓包环境
 func (nc *networkCapture) Prepare() error {
+	nc.tcpChan = make(chan *types.RawFrameData, nc.config.TCPChanSize)
+	nc.udpChan = make(chan *types.RawFrameData, nc.config.UDPChanSize)
+	nc.frameConsumer = nc.config.handler
 	return nil
 }
 

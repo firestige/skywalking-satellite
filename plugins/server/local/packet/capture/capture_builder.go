@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 )
 
@@ -39,6 +41,30 @@ func (b *NetworkCaptureBuilder) WithFilter(filter string) *NetworkCaptureBuilder
 	return b
 }
 
+// WithSnapLength 设置抓包长度
+func (b *NetworkCaptureBuilder) WithSnapLength(len int) *NetworkCaptureBuilder {
+	b.config.SnapLen = len
+	return b
+}
+
+// WithNumBlocks 设置AF_PACKET块数量
+func (b *NetworkCaptureBuilder) WithNumBlocks(num int) *NetworkCaptureBuilder {
+	b.config.NumBlocks = num
+	return b
+}
+
+// WithBlockSize 设置AF_PACKET块大小
+func (b *NetworkCaptureBuilder) WithBlockSize(size int) *NetworkCaptureBuilder {
+	b.config.BlockSize = size
+	return b
+}
+
+// WithFlushTimeout 设置超时时间
+func (b *NetworkCaptureBuilder) WithFlushTimeout(timeout time.Duration) *NetworkCaptureBuilder {
+	b.config.FlushTimeout = timeout
+	return b
+}
+
 // WithWorkerCount 设置工作协程数量
 func (b *NetworkCaptureBuilder) WithTCPWorker(count int) *NetworkCaptureBuilder {
 	b.config.TCPWorkers = count
@@ -50,12 +76,27 @@ func (b *NetworkCaptureBuilder) WithUDPWorker(count int) *NetworkCaptureBuilder 
 	return b
 }
 
+func (b *NetworkCaptureBuilder) WithTCPChanSize(size int) *NetworkCaptureBuilder {
+	b.config.TCPChanSize = size
+	return b
+}
+
+func (b *NetworkCaptureBuilder) WithUDPChanSize(size int) *NetworkCaptureBuilder {
+	b.config.UDPChanSize = size
+	return b
+}
+
 // Build 构建DataSource
 func (b *NetworkCaptureBuilder) Build() (types.DataSource, error) {
-	// 验证配置
+	// TODO 完善配置验证
 	if b.config.Interface == "" {
 		return nil, fmt.Errorf("interface is required")
 	}
+	if err := b.config.Validate(); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	log.Logger.WithField("server", "packet-server").Infof("Building network capture with config: %+v", b.config)
 
 	return newNetworkCapture(b.config, b.ctx), nil
 }

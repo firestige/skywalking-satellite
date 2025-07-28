@@ -1,4 +1,4 @@
-package sip
+package session
 
 import (
 	"github.com/apache/skywalking-satellite/internal/pkg/log"

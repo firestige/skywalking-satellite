@@ -70,7 +70,7 @@ func (nc *networkCapture) dispatchUDPPacket(frame *types.RawFrameData) {
 		return
 	default:
 		log.Logger.Warn("UDP channel is full, dropping frame")
-		// todo add drop packet statistics
+		// TODO add drop packet statistics
 		return
 	}
 }

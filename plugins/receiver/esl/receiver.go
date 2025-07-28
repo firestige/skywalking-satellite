@@ -12,6 +12,7 @@ import (
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativetracing"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
+	"github.com/google/gopacket/layers"
 	"google.golang.org/protobuf/proto"
 	common "skywalking.apache.org/repo/goapi/collect/common/v3"
 	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
@@ -27,6 +28,7 @@ const (
 
 type Receiver struct {
 	config.CommonFields
+	ports string `mapstructure:"ports"` // Listening ports, comma-separated
 
 	OutputChannel chan *v1.SniffData
 	Server        *packet.Server
@@ -54,7 +56,7 @@ func (r *Receiver) DefaultConfig() string {
 func (r *Receiver) RegisterHandler(server interface{}) {
 	r.Server = server.(*packet.Server)
 	r.OutputChannel = make(chan *v1.SniffData, 1000)
-	r.Server.RegisterHandler("esl", "esl", r.packetHandler)
+	r.Server.RegisterHandler(layers.IPProtocolTCP, r.ports, r.Name(), r.packetHandler)
 }
 
 func (r *Receiver) RegisterSyncInvoker(_ module.SyncInvoker) {

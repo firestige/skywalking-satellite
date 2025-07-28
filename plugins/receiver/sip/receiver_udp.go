@@ -44,5 +44,6 @@ func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 	}
 	sipMsg := FromGoSip(goSipMsg, conn, frame.Timestamp)
 
-	return &r.handler.HandleMessage(sipMsg)
+	r.handler.HandleMessage(sipMsg)
+	return nil
 }

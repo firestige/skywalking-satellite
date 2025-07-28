@@ -29,6 +29,7 @@ func (d *dispatcher) Handle(frame *types.RawFrameData) error {
 
 type DispatcherBuilder struct {
 	Manager *Manager
+	err     error
 }
 
 func NewDispatcherBuilder() *DispatcherBuilder {
@@ -38,11 +39,18 @@ func NewDispatcherBuilder() *DispatcherBuilder {
 }
 
 func (b *DispatcherBuilder) WithHandler(protocol layers.IPProtocol, ports string, name string, handler func(frame *types.RawFrameData) error) *DispatcherBuilder {
-	b.Manager.AddMapping(protocol, ports, name, handler)
+	err := b.Manager.AddMapping(protocol, ports, name, handler)
+	if err != nil {
+		log.Logger.Error("Failed to add handler mapping: ", err)
+		b.err = err
+	}
 	return b
 }
 
 func (b *DispatcherBuilder) Build() (types.FrameHandler, error) {
+	if b.err != nil {
+		return nil, fmt.Errorf("failed to build dispatcher: %w", b.err)
+	}
 	return &dispatcher{
 		manager: b.Manager,
 	}, nil

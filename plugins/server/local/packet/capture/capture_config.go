@@ -14,15 +14,17 @@ import (
 
 // CaptureConfig 配置结构
 type CaptureConfig struct {
-	Interface    string                    `mapstructure:"interface" yaml:"interface" validate:"required,interface" json:"interface"`        // 网络接口名称
-	SnapLen      int                       `mapstructure:"snap_len" yaml:"snap_len" validate:"min=64,max=65536" json:"snap_len"`             // 抓包长度
-	TCPWorkers   int                       `mapstructure:"tcp_workers" yaml:"tcp_workers" validate:"min=1,max=100" json:"tcp_workers"`       // tcp工作协程数量
-	UDPWorkers   int                       `mapstructure:"udp_workers" yaml:"udp_workers" validate:"min=1,max=100" json:"udp_workers"`       // udp工作协程数量
-	BlockSize    int                       `mapstructure:"block_size" yaml:"block_size" validate:"min=4096,power_of_two" json:"block_size"`  // AF_PACKET块大小
-	NumBlocks    int                       `mapstructure:"num_blocks" yaml:"num_blocks" validate:"min=1,max=1024" json:"num_blocks"`         // AF_PACKET块数量
-	FlushTimeout time.Duration             `mapstructure:"flush_timeout" yaml:"flush_timeout" validate:"min=0,max=30s" json:"flush_timeout"` // 超时时间
-	Filter       []bpf.RawInstruction      `mapstructure:"filter" yaml:"filter" validate:"max=100" json:"filter"`                            // 过滤规则
-	handler      func(*types.RawFrameData) `validate:"-" json:"-"`                                                                           // 数据处理函数
+	Interface    string                    `mapstructure:"interface" yaml:"interface" validate:"required,interface" json:"interface"`            // 网络接口名称
+	SnapLen      int                       `mapstructure:"snap_len" yaml:"snap_len" validate:"min=64,max=65536" json:"snap_len"`                 // 抓包长度
+	TCPWorkers   int                       `mapstructure:"tcp_workers" yaml:"tcp_workers" validate:"min=1,max=100" json:"tcp_workers"`           // tcp工作协程数量
+	UDPWorkers   int                       `mapstructure:"udp_workers" yaml:"udp_workers" validate:"min=1,max=100" json:"udp_workers"`           // udp工作协程数量
+	BlockSize    int                       `mapstructure:"block_size" yaml:"block_size" validate:"min=4096,power_of_two" json:"block_size"`      // AF_PACKET块大小
+	NumBlocks    int                       `mapstructure:"num_blocks" yaml:"num_blocks" validate:"min=1,max=1024" json:"num_blocks"`             // AF_PACKET块数量
+	FlushTimeout time.Duration             `mapstructure:"flush_timeout" yaml:"flush_timeout" validate:"min=-10ms,max=30s" json:"flush_timeout"` // 超时时间
+	TCPChanSize  int                       `mapstructure:"tcp_chan_size" yaml:"tcp_chan_size" validate:"min=1,max=10000" json:"tcp_chan_size"`   // TCP通道大小
+	UDPChanSize  int                       `mapstructure:"udp_chan_size" yaml:"udp_chan_size" validate:"min=1,max=10000" json:"udp_chan_size"`   // UDP通道大小
+	Filter       []bpf.RawInstruction      `mapstructure:"filter" yaml:"filter" validate:"max=100" json:"filter"`                                // 过滤规则
+	handler      func(*types.RawFrameData) `validate:"-" json:"-"`                                                                               // 数据处理函数
 }
 
 // ValidationError 包含详细的验证错误信息
@@ -67,7 +69,7 @@ func validateInterface(fl validator.FieldLevel) bool {
 	interfaceName := fl.Field().String()
 
 	// 特殊值检查
-	if interfaceName == "any" || interfaceName == "lo" {
+	if interfaceName == "lo" {
 		return true
 	}
 
@@ -145,7 +147,7 @@ func (c *CaptureConfig) ValidateAndApplyDefaults() error {
 // applyDefaults 应用默认值
 func (c *CaptureConfig) applyDefaults() {
 	if c.Interface == "" {
-		c.Interface = "any"
+		c.Interface = "eth0"
 	}
 	if c.SnapLen == 0 {
 		c.SnapLen = 65536
@@ -164,6 +166,12 @@ func (c *CaptureConfig) applyDefaults() {
 	}
 	if c.FlushTimeout == 0 {
 		c.FlushTimeout = pcap.BlockForever
+	}
+	if c.TCPChanSize == 0 {
+		c.TCPChanSize = 1000
+	}
+	if c.UDPChanSize == 0 {
+		c.UDPChanSize = 1000
 	}
 	if len(c.Filter) == 0 {
 		bpfFilter, _ := utils.CompileFilterWithDefaults("tcp or udp")
@@ -207,23 +215,4 @@ func (c *CaptureConfig) String() string {
 // IsValid 快速检查配置是否有效
 func (c *CaptureConfig) IsValid() bool {
 	return c.Validate() == nil
-}
-
-// GetAvailableInterfaces 获取可用的网络接口列表
-func GetAvailableInterfaces() ([]string, error) {
-	interfaces, err := net.Interfaces()
-	if err != nil {
-		return nil, err
-	}
-
-	var names []string
-	names = append(names, "any", "lo") // 添加特殊接口
-
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagUp != 0 { // 只返回启用的接口
-			names = append(names, iface.Name)
-		}
-	}
-
-	return names, nil
 }

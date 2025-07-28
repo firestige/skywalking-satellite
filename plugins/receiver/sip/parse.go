@@ -6,11 +6,18 @@ import (
 	"github.com/ghettovoice/gosip/sip/parser"
 )
 
-type SipParser struct{}
+type SipParser struct {
+	delegate *parser.PacketParser
+}
+
+func NewSipParser() *SipParser {
+	return &SipParser{
+		delegate: parser.NewPacketParser(&LoggerAdapter{log.Logger}),
+	}
+}
 
 func (p *SipParser) Parse(data []byte) (sip.Message, error) {
-	parser := parser.NewPacketParser(&LoggerAdapter{log.Logger}) // Assuming a logger is not needed for this example
-	msg, err := parser.ParseMessage(data)
+	msg, err := p.delegate.ParseMessage(data)
 	if err != nil {
 		return nil, err
 	}

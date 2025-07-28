@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
@@ -36,6 +37,8 @@ type CodecConfig struct {
 	Mtu            int      `mapstructure:"mtu"`             // Maximum Transmission Unit for packet processing
 	WorkerCount    int      `mapstructure:"worker_count"`    // Number of worker goroutines for processing packets
 	LocalAddresses []string `mapstructure:"local_addresses"` // Local addresses to filter packets
+	TCPChanSize    int      `mapstructure:"tcp_chan_size"`   // Size of the TCP channel for packet processing
+	UDPChanSize    int      `mapstructure:"udp_chan_size"`   // Size of the UDP channel for packet processing
 }
 
 type Server struct {
@@ -57,12 +60,6 @@ type Server struct {
 	mu      *sync.RWMutex
 }
 
-func NewServer() *Server {
-	return &Server{
-		mu: &sync.RWMutex{},
-	}
-}
-
 func (s *Server) Name() string {
 	return Name
 }
@@ -80,7 +77,7 @@ func (s *Server) DefaultConfig() string {
 # Afpacket configuration
 afpacket:
   # Network interface to capture packets on (default: any)
-  interface: "any"
+  interface: eth0
   # BPF filter expression (default: empty, captures all)
   filter: ""
   # Snapshot length for packet capture (default: 65536)
@@ -109,6 +106,10 @@ codec:
   #   - "10.0.0.1"
   #   - "172.16.0.1"
   local_addresses: []
+  # Size of the TCP channel for packet processing (default: 1000)
+  tcp_chan_size: 1000
+  # Size of the UDP channel for packet processing (default: 1000)
+  udp_chan_size: 1000
 `
 }
 
@@ -133,22 +134,12 @@ func (s *Server) RegisterHandler(protocol layers.IPProtocol, ports string, name 
 func (s *Server) Prepare() error {
 	log.Logger.WithField("server", s.Name()).Info("Packet server is preparing...")
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	// Create context for lifecycle management
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-
-	var err error
-	err = s.buildPipeline(s.ctx)
-
-	// Prepare data source
-	if err := s.source.Prepare(); err != nil {
-		return fmt.Errorf("failed to prepare data source: %w", err)
-	}
+	s.mu = &sync.RWMutex{}
 
 	log.Logger.WithField("server", s.Name()).Info("Packet server prepared successfully")
-	return err
+	return nil
 }
 
 func (s *Server) buildPipeline(ctx context.Context) error {
@@ -162,8 +153,19 @@ func (s *Server) buildPipeline(ctx context.Context) error {
 	processor := func(frame *types.RawFrameData) {
 		s.filterChain.Filter(frame)
 	}
-	// todo finish the builder
-	s.source, err = capture.NewNetworkCaptureBuilder(ctx, processor).Build()
+	// TODO finish the builder
+	s.source, err = capture.NewNetworkCaptureBuilder(ctx, processor).
+		WithInterface(s.Afpacket.Interface).
+		WithFilter(s.Afpacket.Filter).
+		WithSnapLength(s.Afpacket.SnapLen).
+		WithNumBlocks(s.Afpacket.NumBlocks).
+		WithBlockSize(s.Afpacket.BlockSize).
+		WithFlushTimeout(time.Duration(s.Afpacket.FlushTimeout) * time.Millisecond).
+		WithTCPWorker(s.Codec.WorkerCount).
+		WithUDPWorker(s.Codec.WorkerCount).
+		WithTCPChanSize(s.Codec.TCPChanSize).
+		WithUDPChanSize(s.Codec.UDPChanSize).
+		Build()
 	if err != nil {
 		log.Logger.WithField("server", s.Name()).Errorf("Failed to create data source: %v", err)
 	}
@@ -177,6 +179,16 @@ func (s *Server) Start() error {
 
 	if s.running {
 		return fmt.Errorf("server is already running")
+	}
+
+	if err := s.buildPipeline(s.ctx); err != nil {
+		log.Logger.WithField("server", s.Name()).Errorf("Failed to build pipeline: %v", err)
+		return err
+	}
+
+	// Prepare data source
+	if err := s.source.Prepare(); err != nil {
+		return fmt.Errorf("failed to prepare data source: %w", err)
 	}
 
 	log.Logger.WithField("server", s.Name()).Info("Packet server is starting...")
