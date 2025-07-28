@@ -1,40 +1,10 @@
-package sip
+package utils
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
 )
-
-// buildDialogID constructs a dialog ID based on the Call-ID, From-Tag, and To-Tag.
-// If To-Tag is empty, it returns a boolean indicating whether the dialog ID is known.
-// If To-Tag is not empty, it returns false, indicating that the dialog ID is not known.
-// args:
-//   - msg: SipMessage containing Call-ID, From-Tag, and To-Tag
-//   - earlyDialog: true-early dialog, false-regular dialog
-//
-// returns:
-//   - string: constructed dialog ID
-func buildDialogID(msg types.SipMessage, earlyDialog bool) string {
-	// 使用 Call-ID 和 From-Tag 作为事务 ID 的基础
-	callID := msg.CallID()
-	_, fromTag := ExtractURIAndTag(msg.From())
-	_, toTag := ExtractURIAndTag(msg.To())
-	if earlyDialog {
-		return fmt.Sprintf("%s|%s", callID, fromTag)
-	} else {
-		return fmt.Sprintf("%s|%s|%s", callID, fromTag, toTag)
-	}
-}
-
-func buildTransactionID(request types.SipMessage, forceUseKnown bool) string {
-	// 使用 Call-ID 、 Cseq 和 Via头的branch 作为事务 ID 的基础(为了避免空格引起的问题，使用下划线替代CSeq中的空格)
-	callID := request.CallID()
-	cseq := strings.ReplaceAll(request.CSeq(), " ", "_")
-	branch := request.ViaBranch()
-	return fmt.Sprintf("%s|%s|%s", callID, cseq, branch)
-}
 
 func ExtractURIAndTag(header string) (string, string) {
 	// 示例输入: "sip:alice@example.com;tag=12345" 或 "<sip:alice@example.com>;tag=12345"
@@ -92,7 +62,7 @@ func splitParams(params string) []string {
 	return result
 }
 
-func extractMethodFromCseq(cseq string) types.Method {
+func ExtractMethodFromCseq(cseq string) types.Method {
 	// CSeq格式通常为 "1 INVITE" 或 "2 ACK"
 	parts := strings.SplitN(cseq, " ", 2)
 	if len(parts) < 2 {

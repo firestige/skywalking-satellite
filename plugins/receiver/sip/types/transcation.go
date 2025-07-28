@@ -47,6 +47,7 @@ type Dialog interface {
 	RemoteURI() string
 	CreatedAt() int64
 	UpdatedAt() int64
+	Metadatas() map[string]string
 	GetOrCreateTransactionIfAbsent(msg SipMessage) (Transaction, error)
 	ChangeState(from, to DialogState) error
 }
@@ -177,24 +178,6 @@ const (
 	UAUnknown UAType = iota
 	UAClient
 	UAServer
-)
-
-type EventType int
-
-const (
-	// Dialog 相关事件
-	EventDialogCreated      EventType = iota // Dialog 创建
-	EventDialogStateChanged                  // Dialog 状态变化
-	EventDialogTerminated                    // Dialog 终止/移除
-
-	// Transaction 相关事件
-	EventTransactionCreated      // Transaction 创建
-	EventTransactionStateChanged // Transaction 状态变化
-	EventTransactionTerminated   // Transaction 终止/移除
-	EventTransactionTimeout      // Transaction 超时
-
-	// 其它会话相关事件
-	EventDialogTimeout // Dialog 超时
 )
 
 type TransactionState interface {

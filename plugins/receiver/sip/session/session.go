@@ -73,8 +73,8 @@ func (s *session) GetOrCreateDialogIfAbsent(msg types.SipMessage) (types.Dialog,
 	callID := msg.CallID()
 
 	// 假设有extractURIAndTag工具函数
-	_, fromTag := extractURIAndTag(msg.From())
-	_, toTag := extractURIAndTag(msg.To())
+	_, fromTag := ExtractURIAndTag(msg.From())
+	_, toTag := ExtractURIAndTag(msg.To())
 
 	// 虚拟Dialog场景（如REGISTER/OPTIONS等）
 	if s.hasVirtualDialog() {

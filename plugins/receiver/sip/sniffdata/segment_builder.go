@@ -18,16 +18,16 @@ type SegmentBuilder struct {
 	Timestamp       int64
 	TraceId         string
 	SegmentId       string
-	Spans           []*agent.SpanObject
-	idGenerator     *SegmentIDGenerator
+	Spans           []*agent.SpanObject // 包含的Span对象
 }
 
 func NewSegmentBuilder(serviceName string, instanceID string) *SegmentBuilder {
+	segmentID := NewSegmentIDGenerator(instanceID).Generate()
 	return &SegmentBuilder{
 		ServiceName:     serviceName,
 		ServiceInstance: instanceID,
 		Spans:           make([]*agent.SpanObject, 0),
-		idGenerator:     NewSegmentIDGenerator(instanceID),
+		SegmentId:       segmentID,
 	}
 }
 
@@ -43,12 +43,6 @@ func (b *SegmentBuilder) WithTraceId(traceId string) *SegmentBuilder {
 	return b
 }
 
-func (b *SegmentBuilder) WithSegmentId(segmentId string) *SegmentBuilder {
-	// 设置段ID
-	b.SegmentId = segmentId
-	return b
-}
-
 func (b *SegmentBuilder) WithSpan(span *agent.SpanObject) *SegmentBuilder {
 	// 添加Span到段中
 	b.Spans = append(b.Spans, span)
@@ -61,29 +55,24 @@ func (b *SegmentBuilder) WithSpans(spans []*agent.SpanObject) *SegmentBuilder {
 	return b
 }
 
-func (b *SegmentBuilder) WithSpanBuilder() *SpanBuilder {
-	// 添加span到段中
-	return newSpanBuilder(b)
-}
-
-func (b *SegmentBuilder) buildSegment() *agent.SegmentObject {
-	// 构建跟踪段对象
+func (b *SegmentBuilder) Build() *agent.SegmentObject {
 	return &agent.SegmentObject{
 		TraceId:         b.TraceId,
 		TraceSegmentId:  b.SegmentId,
-		Spans:           []*agent.SpanObject{},
+		Spans:           b.Spans,
 		Service:         b.ServiceName,
 		ServiceInstance: b.ServiceInstance,
-		IsSizeLimited:   false, // 先不考虑截断span提升传输吞吐量
+		IsSizeLimited:   true,
 	}
 }
 
-func (b *SegmentBuilder) Build() *v1.SniffData {
-	segment := b.buildSegment()
+func WrapWithSniffData(segment *agent.SegmentObject) *v1.SniffData {
+	startTime := segment.Spans[0].StartTime
+	// 包装Segment为SniffData
 	traceByte, _ := proto.Marshal(segment)
 	return &v1.SniffData{
 		Name:      "sip-capture",
-		Timestamp: b.Timestamp,
+		Timestamp: startTime,
 		Type:      v1.SniffType_TracingType,
 		Remote:    true,
 		Data: &v1.SniffData_Segment{
@@ -110,12 +99,22 @@ type SpanBuilder struct {
 	parent        *SegmentBuilder
 }
 
-func newSpanBuilder(parentBuilder *SegmentBuilder) *SpanBuilder {
+func NewSpanBuilder() *SpanBuilder {
 	return &SpanBuilder{
-		Refs:   make([]*agent.SegmentReference, 0),
-		Tags:   make([]*common.KeyStringValuePair, 0),
-		Logs:   make([]*agent.Log, 0),
-		parent: parentBuilder,
+		SpanId:        0,
+		ParentSpanId:  0,
+		StartTime:     0,
+		EndTime:       0,
+		Refs:          make([]*agent.SegmentReference, 0),
+		OperationName: "",
+		Peer:          "",
+		SpanType:      agent.SpanType_Local,
+		SpanLayer:     agent.SpanLayer_Unknown,
+		ComponentId:   0,
+		IsError:       false,
+		Tags:          make([]*common.KeyStringValuePair, 0),
+		Logs:          make([]*agent.Log, 0),
+		SkipAnalysis:  false,
 	}
 }
 
@@ -200,6 +199,17 @@ func (b *SpanBuilder) WithTags(tags []*common.KeyStringValuePair) *SpanBuilder {
 	return b
 }
 
+func (b *SpanBuilder) WithHeaders(headers map[string]string) *SpanBuilder {
+	// 将Headers转换为标签
+	for key, value := range headers {
+		b.Tags = append(b.Tags, &common.KeyStringValuePair{
+			Key:   "sip.header." + key,
+			Value: value,
+		})
+	}
+	return b
+}
+
 func (b *SpanBuilder) WithLog(timestamp int64, metrices map[string]string) *SpanBuilder {
 	// 设置单个日志
 	log := &agent.Log{
@@ -248,39 +258,6 @@ func (b *SpanBuilder) Build() *agent.SpanObject {
 	}
 }
 
-func (b *SpanBuilder) reset() {
-	// 重置SpanBuilder状态
-	b.SpanId = 0
-	b.ParentSpanId = 0
-	b.StartTime = 0
-	b.EndTime = 0
-	b.Refs = make([]*agent.SegmentReference, 0)
-	b.OperationName = ""
-	b.Peer = ""
-	b.SpanType = agent.SpanType_Local
-	b.SpanLayer = agent.SpanLayer_Unknown
-	b.ComponentId = 0
-	b.IsError = false
-	b.Tags = make([]*common.KeyStringValuePair, 0)
-	b.Logs = make([]*agent.Log, 0)
-	b.SkipAnalysis = false
-}
-
-func (b *SpanBuilder) And() *SpanBuilder {
-	b.parent.Spans = append(b.parent.Spans, b.Build())
-	// 清空当前SpanBuilder的状态以便下次使用
-	b.reset()
-	// 返回父SegmentBuilder
-	return b
-}
-
-func (b *SpanBuilder) Finish() *SegmentBuilder {
-	b.parent.Spans = append(b.parent.Spans, b.Build())
-	// 清空当前SpanBuilder的状态以便下次使用
-	// 返回父SegmentBuilder
-	return b.parent
-}
-
 type SegmentReferenceBuilder struct {
 	TraceId                  string
 	ParentTraceSegmentId     string
@@ -295,19 +272,19 @@ func NewSegmentReferenceBuilder() *SegmentReferenceBuilder {
 	return &SegmentReferenceBuilder{}
 }
 
-func (b *SegmentReferenceBuilder) WithTraceId(traceId string) *SegmentReferenceBuilder {
+func (b *SegmentReferenceBuilder) WithTraceID(traceId string) *SegmentReferenceBuilder {
 	// 设置TraceId
 	b.TraceId = traceId
 	return b
 }
 
-func (b *SegmentReferenceBuilder) WithParentTraceSegmentId(parentTraceSegmentId string) *SegmentReferenceBuilder {
+func (b *SegmentReferenceBuilder) WithParentTraceSegmentID(parentTraceSegmentId string) *SegmentReferenceBuilder {
 	// 设置父TraceSegmentId
 	b.ParentTraceSegmentId = parentTraceSegmentId
 	return b
 }
 
-func (b *SegmentReferenceBuilder) WithParentSpanId(parentSpanId int32) *SegmentReferenceBuilder {
+func (b *SegmentReferenceBuilder) WithParentSpanID(parentSpanId int32) *SegmentReferenceBuilder {
 	// 设置父SpanId
 	b.ParentSpanId = parentSpanId
 	return b

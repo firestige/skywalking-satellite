@@ -5,6 +5,7 @@ type SipObject interface {
 	// this is useful for debugging and logging
 	String() string
 	Direction() Direction
+	CreatedAt() int64
 }
 
 type SipContent interface {
@@ -55,7 +56,7 @@ type Headers interface {
 type Method string
 
 const (
-	MethodUnknown Method = "UNKNOWN"
+	MethodUnknown Method = "UNKNOWN" // 未知方法,一般是遇到了定义之外的SIP方法
 	Invite        Method = "INVITE"
 	Ack           Method = "ACK"
 	Options       Method = "OPTIONS"

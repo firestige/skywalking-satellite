@@ -26,8 +26,8 @@ type dialog struct {
 }
 
 func NewDialog(id string, session types.Session, callID, local, remote string) *dialog {
-	localURI, localTag := extractURIAndTag(local)
-	remoteURI, remoteTag := extractURIAndTag(remote)
+	localURI, localTag := ExtractURIAndTag(local)
+	remoteURI, remoteTag := ExtractURIAndTag(remote)
 	return &dialog{
 		id:           id,
 		state:        types.DialogStateEarly,
