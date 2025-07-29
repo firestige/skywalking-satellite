@@ -68,6 +68,14 @@ func (b *SegmentBuilder) Build() *agent.SegmentObject {
 
 func WrapWithSniffData(segment *agent.SegmentObject) *v1.SniffData {
 	startTime := segment.Spans[0].StartTime
+	// 按照约定把TraceID加上SNIFF-前缀
+	if segment.TraceId != "" {
+		segment.TraceId = "SNIFF-" + segment.TraceId
+	}
+	//  如果span[0]的endtime<span[len-1].endtime，则使用span[len-1]的endtime替换span[0]的endtime
+	if len(segment.Spans) > 0 && segment.Spans[0].EndTime < segment.Spans[len(segment.Spans)-1].EndTime {
+		segment.Spans[0].EndTime = segment.Spans[len(segment.Spans)-1].EndTime
+	}
 	// 包装Segment为SniffData
 	traceByte, _ := proto.Marshal(segment)
 	return &v1.SniffData{

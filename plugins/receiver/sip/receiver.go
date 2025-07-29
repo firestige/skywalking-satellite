@@ -4,11 +4,13 @@ import (
 	"fmt"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
+	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	module "github.com/apache/skywalking-satellite/internal/satellite/module/api"
 	forwarder "github.com/apache/skywalking-satellite/plugins/forwarder/api"
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativelog"
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativetracing"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/session"
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip/trace"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet"
 	"github.com/google/gopacket/layers"
 	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
@@ -54,9 +56,14 @@ ports: "5060,5061" # 监听的端口列表，逗号分隔
 
 func (r *Receiver) RegisterHandler(server interface{}) {
 	r.Server = server.(*packet.Server)
-	r.OutputChannel = make(chan *v1.SniffData, 1000)
+	r.OutputChannel = make(chan *v1.SniffData, 10000)
 	r.sipParser = NewSipParser()
 	r.handler = session.NewSessionHandler()
+	submit := func(data *v1.SniffData) {
+		log.Logger.Debugf("Submitting data: %s", data.Name)
+		r.OutputChannel <- data
+	}
+	r.handler.RegisterListener(trace.NewTraceListener(r.ServiceName, r.ServiceInstance, submit))
 	r.Server.RegisterHandler(layers.IPProtocolTCP, r.Ports, fmt.Sprintf("%s-TCP", r.ServiceName), r.processTCPFrame)
 	r.Server.RegisterHandler(layers.IPProtocolUDP, r.Ports, fmt.Sprintf("%s-UDP", r.ServiceName), r.processUDPFrame)
 }

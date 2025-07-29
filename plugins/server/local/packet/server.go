@@ -33,12 +33,12 @@ type AfpacketConfig struct {
 
 type CodecConfig struct {
 	// Codec configuration for packet processing
-	RingSize       int      `mapstructure:"ring_size"`       // Size of the ring buffer for packet processing
-	Mtu            int      `mapstructure:"mtu"`             // Maximum Transmission Unit for packet processing
-	WorkerCount    int      `mapstructure:"worker_count"`    // Number of worker goroutines for processing packets
-	LocalAddresses []string `mapstructure:"local_addresses"` // Local addresses to filter packets
-	TCPChanSize    int      `mapstructure:"tcp_chan_size"`   // Size of the TCP channel for packet processing
-	UDPChanSize    int      `mapstructure:"udp_chan_size"`   // Size of the UDP channel for packet processing
+	RingSize    int    `mapstructure:"ring_size"`     // Size of the ring buffer for packet processing
+	Mtu         int    `mapstructure:"mtu"`           // Maximum Transmission Unit for packet processing
+	WorkerCount int    `mapstructure:"worker_count"`  // Number of worker goroutines for processing packets
+	LocalIP     string `mapstructure:"local_ip"`      // Local addresses to filter packets
+	TCPChanSize int    `mapstructure:"tcp_chan_size"` // Size of the TCP channel for packet processing
+	UDPChanSize int    `mapstructure:"udp_chan_size"` // Size of the UDP channel for packet processing
 }
 
 type Server struct {
@@ -101,11 +101,11 @@ codec:
   # Use YAML array syntax:
   # local_addresses: ["192.168.1.100", "10.0.0.1", "172.16.0.1"]
   # Or YAML list syntax:
-  # local_addresses:
+  # local_ip:
   #   - "192.168.1.100"
   #   - "10.0.0.1"
   #   - "172.16.0.1"
-  local_addresses: []
+  local_ip: 127.0.0.1
   # Size of the TCP channel for packet processing (default: 1000)
   tcp_chan_size: 1000
   # Size of the UDP channel for packet processing (default: 1000)
@@ -165,6 +165,7 @@ func (s *Server) buildPipeline(ctx context.Context) error {
 		WithUDPWorker(s.Codec.WorkerCount).
 		WithTCPChanSize(s.Codec.TCPChanSize).
 		WithUDPChanSize(s.Codec.UDPChanSize).
+		WithLocalIP(s.Codec.LocalIP).
 		Build()
 	if err != nil {
 		log.Logger.WithField("server", s.Name()).Errorf("Failed to create data source: %v", err)

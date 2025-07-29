@@ -1,6 +1,7 @@
 package transaction
 
 import (
+	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 )
@@ -46,11 +47,11 @@ func (ctx *TransactionContext) HandleMessage(msg types.SipMessage) error {
 }
 
 func (ctx *TransactionContext) transitionTo(newState TransactionState) {
-	if ctx.state != nil {
-		ctx.state.Exit(ctx)
-	}
+	currentState := ctx.state
+	ctx.state.Exit(ctx)
 	ctx.state = newState
 	newState.Enter(ctx)
+	log.Logger.WithField("Transaction-ID", ctx.ID()).Infof("Transitioned transaction state, from %s to %s", currentState.Name(), newState.Name())
 }
 
 func (ctx *TransactionContext) StartTimer(name TimerName, span TimerSpan) {

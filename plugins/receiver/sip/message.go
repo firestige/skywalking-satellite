@@ -117,6 +117,10 @@ func (m *sipMessage) String() string {
 	return m.delegate.String()
 }
 
+func (m *sipMessage) StartLine() string {
+	return m.delegate.StartLine()
+}
+
 // SipRequest interface implementations
 func (r *goSipRequest) Method() types.Method {
 	return r.method

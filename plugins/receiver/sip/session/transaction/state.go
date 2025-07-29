@@ -8,6 +8,8 @@ import (
 )
 
 type TransactionState interface {
+	Name() string
+	IsTerminated() bool // 是否为终止状态
 	HandleMessage(ctx *TransactionContext, msg types.SipMessage) (TransactionState, error)
 	Enter(ctx *TransactionContext)
 	Exit(ctx *TransactionContext)
@@ -16,6 +18,10 @@ type TransactionState interface {
 // ---- Non-INVITE Transaction States ----
 
 type NonInviteTryingState struct{}
+
+func (s *NonInviteTryingState) Name() string {
+	return "NonInviteTryingState"
+}
 
 func (s *NonInviteTryingState) Enter(ctx *TransactionContext) {
 	ctx.StartTimer(TimerE, T1)
@@ -46,7 +52,15 @@ func (s *NonInviteTryingState) Exit(ctx *TransactionContext) {
 
 }
 
+func (s *NonInviteTryingState) IsTerminated() bool {
+	return false
+}
+
 type NonInviteProceedingState struct{}
+
+func (s *NonInviteProceedingState) Name() string {
+	return "NonInviteProceedingState"
+}
 
 func (s *NonInviteProceedingState) Enter(ctx *TransactionContext) {
 	ctx.StartTimer(TimerF, 64*T1)
@@ -70,7 +84,15 @@ func (s *NonInviteProceedingState) Exit(ctx *TransactionContext) {
 
 }
 
+func (s *NonInviteProceedingState) IsTerminated() bool {
+	return false
+}
+
 type NonInviteCompletedState struct{}
+
+func (s *NonInviteCompletedState) Name() string {
+	return "NonInviteCompletedState"
+}
 
 func (s *NonInviteCompletedState) Enter(ctx *TransactionContext) {
 	// 通常在UAS侧启动TimerJ，UAC侧启动TimerK
@@ -94,7 +116,15 @@ func (s *NonInviteCompletedState) Exit(ctx *TransactionContext) {
 	ctx.CancelTimer(TimerK)
 }
 
+func (s *NonInviteCompletedState) IsTerminated() bool {
+	return false
+}
+
 type NonInviteTerminatedState struct{}
+
+func (s *NonInviteTerminatedState) Name() string {
+	return "NonInviteTerminatedState"
+}
 
 func (s *NonInviteTerminatedState) Enter(ctx *TransactionContext) {
 	// 事务终止，无需操作
@@ -106,9 +136,17 @@ func (s *NonInviteTerminatedState) HandleMessage(ctx *TransactionContext, msg ty
 
 func (s *NonInviteTerminatedState) Exit(ctx *TransactionContext) {}
 
+func (s *NonInviteTerminatedState) IsTerminated() bool {
+	return true
+}
+
 // ---- INVITE Transaction States ----
 
 type InviteCallingState struct{}
+
+func (s *InviteCallingState) Name() string {
+	return "InviteCallingState"
+}
 
 func (s *InviteCallingState) Enter(ctx *TransactionContext) {
 	ctx.StartTimer(TimerA, T1)
@@ -141,7 +179,15 @@ func (s *InviteCallingState) Exit(ctx *TransactionContext) {
 	ctx.CancelTimer(TimerB)
 }
 
+func (s *InviteCallingState) IsTerminated() bool {
+	return false
+}
+
 type InviteProceedingState struct{}
+
+func (s *InviteProceedingState) Name() string {
+	return "InviteProceedingState"
+}
 
 func (s *InviteProceedingState) Enter(ctx *TransactionContext) {
 	ctx.StartTimer(TimerC, 64*T1)
@@ -169,7 +215,15 @@ func (s *InviteProceedingState) Exit(ctx *TransactionContext) {
 	ctx.CancelTimer(TimerC)
 }
 
+func (s *InviteProceedingState) IsTerminated() bool {
+	return false
+}
+
 type InviteCompletedState struct{}
+
+func (s *InviteCompletedState) Name() string {
+	return "InviteCompletedState"
+}
 
 func (s *InviteCompletedState) Enter(ctx *TransactionContext) {
 	ctx.StartTimer(TimerD, 64*T1)
@@ -189,7 +243,15 @@ func (s *InviteCompletedState) Exit(ctx *TransactionContext) {
 	ctx.CancelTimer(TimerD)
 }
 
+func (s *InviteCompletedState) IsTerminated() bool {
+	return false
+}
+
 type InviteConfirmedState struct{}
+
+func (s *InviteConfirmedState) Name() string {
+	return "InviteConfirmedState"
+}
 
 func (s *InviteConfirmedState) Enter(ctx *TransactionContext) {
 	ctx.StartTimer(TimerI, T1)
@@ -210,7 +272,19 @@ func (s *InviteConfirmedState) Exit(ctx *TransactionContext) {
 	ctx.CancelTimer(TimerI)
 }
 
+func (s *InviteConfirmedState) IsTerminated() bool {
+	return false
+}
+
 type InviteTerminatedState struct{}
+
+func (s *InviteTerminatedState) Name() string {
+	return "InviteTerminatedState"
+}
+
+func (s *InviteTerminatedState) IsTerminated() bool {
+	return true // 事务已终止
+}
 
 func (s *InviteTerminatedState) Enter(ctx *TransactionContext) {
 	// 事务终止，无需操作

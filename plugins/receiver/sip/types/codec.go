@@ -20,6 +20,7 @@ type SipMessage interface {
 	CSeq() string
 	From() string
 	To() string
+	StartLine() string
 	ViaBranch() string
 	IsRequest() bool
 }

@@ -3,6 +3,7 @@ package dialog
 import (
 	"fmt"
 
+	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 )
@@ -25,7 +26,7 @@ func NewDialogContext(req types.SipRequest) (*DialogContext, error) {
 		return nil, fmt.Errorf("invalid method %s for dialog creation", req.Method())
 	}
 	// TODO 注意早期对话没有TO头
-	id := utils.BuildDialogID(req, false)
+	id := utils.BuildDialogID(req, true)
 	ua := utils.ParseUAType(req)
 	callID := req.CallID()
 	state := &EarlyState{}
@@ -59,7 +60,7 @@ func NewDialogContext(req types.SipRequest) (*DialogContext, error) {
 			metaData:  make(map[string]string),
 		}, nil
 	}
-	return nil, fmt.Errorf("unsupported UA type %s for dialog creation", ua)
+	return nil, fmt.Errorf("unsupported UA type %v for dialog creation", ua)
 }
 
 func (ctx *DialogContext) HandleMessage(msg types.SipMessage) error {
@@ -72,11 +73,12 @@ func (ctx *DialogContext) HandleMessage(msg types.SipMessage) error {
 }
 
 func (ctx *DialogContext) transitionTo(newState DialogState) {
-	if ctx.state != nil {
-		ctx.state.Exit(ctx)
-	}
+	currentStateName := ctx.state.Name()
+	newStateName := newState.Name()
+	ctx.state.Exit(ctx)
 	ctx.state = newState
 	newState.Enter(ctx)
+	log.Logger.WithField("Dialog-ID", ctx.ID()).Infof("Transitioned dialog state, from %s to %s", currentStateName, newStateName)
 }
 
 func (ctx *DialogContext) ID() string {

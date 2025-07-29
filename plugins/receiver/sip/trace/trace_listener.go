@@ -1,33 +1,33 @@
-package sip
+package trace
 
 import (
 	"fmt"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip/sniffdata"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
+	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
 )
 
 type TraceListener struct {
 	serviceName       string
 	serviceInstanceId string
 	manager           *TraceManager
+	submit            func(*v1.SniffData)
 }
 
-func NewTraceListener(serviceName, serviceInstanceId string) *TraceListener {
+func NewTraceListener(serviceName, serviceInstanceId string, submit func(*v1.SniffData)) *TraceListener {
 	return &TraceListener{
 		serviceName:       serviceName,
 		serviceInstanceId: serviceInstanceId,
 		manager:           NewTraceManager(serviceName, serviceInstanceId),
+		submit:            submit,
 	}
 }
 
-func (l *TraceListener) OnRequestSent(req types.SipRequest) {
-	l.initContext(req, types.UAClient)
-}
-
-func (l *TraceListener) OnRequestReceived(req types.SipRequest) {
-	l.initContext(req, types.UAServer)
+func (l *TraceListener) OnRequest(req types.SipRequest, ua types.UAType) {
+	l.initContext(req, ua)
 }
 
 func (l *TraceListener) initContext(req types.SipRequest, uaType types.UAType) {
@@ -51,7 +51,7 @@ func (l *TraceListener) initContext(req types.SipRequest, uaType types.UAType) {
 
 // TODO 根据实际情况修改
 func GetTraceIDFromRequest(req types.SipRequest) string {
-	panic("unimplemented")
+	return req.CallID()
 }
 
 func (l *TraceListener) OnDialogCreated(dialog types.Dialog) {
@@ -68,12 +68,16 @@ func (l *TraceListener) OnDialogStateChanged(dialog types.Dialog) {
 }
 
 func (l *TraceListener) OnDialogTerminated(dialog types.Dialog) {
+	log.Logger.Debugf("Dialog terminated: %s", dialog.ID())
 	ctx, exist := l.manager.GetTraceContextByCallID(dialog.CallID())
 	if !exist {
 		log.Logger.Errorf("trace context not found for dialog with Call-ID: %s", dialog.CallID())
 		return
 	}
 	ctx.FinishExistSpan(dialog.ID(), false, dialog.UpdatedAt()) // 我们认为事务有成功与失败，会话没有
+	data := sniffdata.WrapWithSniffData(ctx.segment)            // 发送Segment
+	l.submit(data)                                              // 提交Segment到输出通道
+	// l.manager.RemoveTraceContextByCallID(dialog.CallID()) // TODO会话结束后移除
 }
 
 func (l *TraceListener) OnTransactionCreated(transaction types.Transaction) {
@@ -102,31 +106,56 @@ func (l *TraceListener) OnTransactionStateChanged(transaction types.Transaction)
 	// 一般dialog状态变化时不需要更新Segment和Span
 }
 
-func (l *TraceListener) OnTransactionTerminated(transaction types.Transaction) {
-	ctx, exist := l.manager.GetTraceContextByCallID(transaction.Request().CallID())
+func (l *TraceListener) OnTransactionTerminated(tx types.Transaction) {
+	log.Logger.Debugf("Transaction terminated: %s", tx.ID())
+	ctx, exist := l.manager.GetTraceContextByCallID(tx.Request().CallID())
 	if !exist {
-		log.Logger.Errorf("trace context not found for dialog with Call-ID: %s", transaction.Request().CallID())
+		log.Logger.Errorf("trace context not found for dialog with Call-ID: %s", tx.Request().CallID())
 		return
 	}
-	isError := transaction.LastResponse() != nil && transaction.LastResponse().Status() >= 300
+	isError := tx.LastResponse() != nil && tx.LastResponse().Status() >= 300
 	// 结束现有的Span
-	ctx.FinishExistSpan(transaction.ID(), isError, transaction.UpdatedAt())
+	ctx.FinishExistSpan(tx.ID(), isError, tx.UpdatedAt())
+	switch tx.Request().Method() {
+	case types.MethodInvite, types.MethodInfo, types.MethodBye, types.MethodCancel:
+		// 对于这些方法，我们不需要发送Segment,由dialog生命周期发送
+		return
+	default:
+		data := sniffdata.WrapWithSniffData(ctx.segment) // 发送Segment
+		l.submit(data)                                   // 提交Segment到输出通道
+	}
 }
 
-func (l *TraceListener) OnTransactionTimeout(transaction types.Transaction) {
-	ctx, exist := l.manager.GetTraceContextByCallID(transaction.Request().CallID())
+func (l *TraceListener) OnTransactionTimeout(tx types.Transaction) {
+	ctx, exist := l.manager.GetTraceContextByCallID(tx.Request().CallID())
 	if !exist {
-		log.Logger.Errorf("trace context not found for dialog with Call-ID: %s", transaction.Request().CallID())
+		log.Logger.Errorf("trace context not found for dialog with Call-ID: %s", tx.Request().CallID())
 		return
 	}
-	ctx.FinishExistSpan(transaction.ID(), true, transaction.UpdatedAt()) // 超时场景一定是错误
+	ctx.FinishExistSpan(tx.ID(), true, tx.UpdatedAt()) // 超时场景一定是错误
+	switch tx.Request().Method() {
+	case types.MethodInfo, types.MethodBye, types.MethodCancel:
+		// 对于这些方法，我们不需要发送Segment
+		return
+	default:
+		data := sniffdata.WrapWithSniffData(ctx.segment) // 发送Segment
+		l.submit(data)                                   // 提交Segment到输出通道
+	}
 }
 
-func (l *TraceListener) OnTransactionError(transaction types.Transaction, err error) {
-	ctx, exist := l.manager.GetTraceContextByCallID(transaction.Request().CallID())
+func (l *TraceListener) OnTransactionError(tx types.Transaction, err error) {
+	ctx, exist := l.manager.GetTraceContextByCallID(tx.Request().CallID())
 	if !exist {
-		log.Logger.Errorf("trace context not found for dialog with Call-ID: %s", transaction.Request().CallID())
+		log.Logger.Errorf("trace context not found for dialog with Call-ID: %s", tx.Request().CallID())
 		return
 	}
-	ctx.FinishExistSpan(transaction.ID(), true, transaction.UpdatedAt()) // 会话错误场景一定是错误
+	ctx.FinishExistSpan(tx.ID(), true, tx.UpdatedAt()) // 会话错误场景一定是错误
+	switch tx.Request().Method() {
+	case types.MethodInfo, types.MethodBye, types.MethodCancel:
+		// 对于这些方法，我们不需要发送Segment
+		return
+	default:
+		data := sniffdata.WrapWithSniffData(ctx.segment) // 发送Segment
+		l.submit(data)                                   // 提交Segment到输出通道
+	}
 }

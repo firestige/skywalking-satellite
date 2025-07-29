@@ -48,6 +48,7 @@ func (nc *networkCapture) captureLoop() {
 func (nc *networkCapture) dispatchPacket(packet gopacket.Packet) {
 	frame := &types.RawFrameData{}
 	parseTransportLayers(packet, frame)
+	nc.refreshDirection(frame)
 	protocol := frame.Connection.Protocol
 
 	switch protocol {
@@ -59,6 +60,22 @@ func (nc *networkCapture) dispatchPacket(packet gopacket.Packet) {
 		log.Logger.Debugf("Unsupported IP protocol: %s", protocol)
 		// todo add drop packet statistics
 		return
+	}
+}
+
+func (nc *networkCapture) refreshDirection(frame *types.RawFrameData) {
+	if frame.Direction == types.Unknown {
+		srcIP := frame.Connection.SrcHost
+		dstIP := frame.Connection.DstHost
+		if srcIP == nc.config.LocalIP {
+			frame.Direction = types.Outbound
+			return
+		}
+		if dstIP == nc.config.LocalIP {
+			frame.Direction = types.Inbound
+			return
+		}
+		log.Logger.Warnf("Cannot determine direction for frame: %v", frame)
 	}
 }
 

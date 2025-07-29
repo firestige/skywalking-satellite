@@ -1,4 +1,4 @@
-package sip
+package trace
 
 import (
 	"fmt"
@@ -9,6 +9,7 @@ import (
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
+	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
 )
 
 type TraceContext struct {
@@ -55,8 +56,10 @@ func (m *TraceManager) CreateTraceContext(traceID string, createAt int64) *Trace
 			WithTimestamp(createAt).
 			Build()
 		m.traceContext[traceID] = &TraceContext{
-			traceID: traceID,
-			segment: segment,
+			traceID:      traceID,
+			segment:      segment,
+			idMapping:    make([]string, 0), // 初始化idMapping
+			isInitalized: false,             // 初始状态为未初始化
 		}
 	}
 	return m.traceContext[traceID]
@@ -112,9 +115,9 @@ func (ctx *TraceContext) CreateNewSpan(id, parent, method, remoteURI string, sta
 	ctx.segment.Spans = append(ctx.segment.Spans, span)
 }
 
-func (ctx *TraceContext) FinishExistSpan(txID string, isError bool, endTime int64) {
+func (ctx *TraceContext) FinishExistSpan(id string, isError bool, endTime int64) {
 	for i, record := range ctx.idMapping {
-		if record == txID {
+		if record == id {
 			span := ctx.segment.Spans[i]
 			span.EndTime = endTime
 			span.IsError = isError
@@ -122,7 +125,7 @@ func (ctx *TraceContext) FinishExistSpan(txID string, isError bool, endTime int6
 		}
 	}
 	// TODO 讨论是不是预定义ErrNotFound然后用log.Logger.WithError(ErrNotFound).Errorf()比较好
-	log.Logger.Errorf("span with ID %s not found in trace context %s", txID, ctx.traceID)
+	log.Logger.Errorf("span with ID %s not found in trace context %s", id, ctx.traceID)
 }
 
 // 根Span是一个虚拟的Span，通常用于表示当前服务抓包的起点，主要用于解决in-dialog对话时出现多个fork dialog的情况，以及fs桥接会话时出现多条腿的情况。
@@ -161,4 +164,14 @@ func (ctx *TraceContext) getParentSpanID(id string) int32 {
 		}
 	}
 	return int32(0)
+}
+
+func (ctx *TraceContext) sendSegment(channel chan *v1.SniffData) {
+	if ctx.isInitalized && len(ctx.segment.Spans) > 1 {
+		// 发送SegmentObject到channel
+		data := sniffdata.WrapWithSniffData(ctx.segment)
+		channel <- data
+	} else {
+		log.Logger.Warnf("TraceContext %s is not initialized or has no spans, skipping send", ctx.traceID)
+	}
 }

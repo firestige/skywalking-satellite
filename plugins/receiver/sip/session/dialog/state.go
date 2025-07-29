@@ -3,18 +3,27 @@ package dialog
 import (
 	"fmt"
 
-	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 )
 
 type DialogState interface {
+	Name() string
+	IsTerminated() bool // 是否为终止状态
 	HandleMessage(ctx *DialogContext, msg types.SipMessage) (DialogState, error)
 	Enter(ctx *DialogContext)
 	Exit(ctx *DialogContext)
 }
 
 type EarlyState struct{}
+
+func (s *EarlyState) Name() string {
+	return "EarlyState"
+}
+
+func (s *EarlyState) IsTerminated() bool {
+	return false
+}
 
 func (s *EarlyState) Enter(ctx *DialogContext) {
 	// 初始化对话状态
@@ -47,7 +56,6 @@ func (s *EarlyState) HandleMessage(ctx *DialogContext, msg types.SipMessage) (Di
 			return next, nil
 		default:
 			// 其他请求，保持Early
-			log.Logger.WithError(fmt.Errorf("EarlyState: unhandled request method %s", req.Method())).Debugf("Received SIP request: %s", req.String())
 			return s, nil
 		}
 	}
@@ -59,6 +67,14 @@ func (s *EarlyState) Exit(ctx *DialogContext) {
 }
 
 type ConfirmedState struct{}
+
+func (s *ConfirmedState) Name() string {
+	return "ConfirmedState"
+}
+
+func (s *ConfirmedState) IsTerminated() bool {
+	return false
+}
 
 func (s *ConfirmedState) Enter(ctx *DialogContext) {
 	// 初始化已确认状态
@@ -84,6 +100,14 @@ func (s *ConfirmedState) Exit(ctx *DialogContext) {
 }
 
 type TerminatedState struct{}
+
+func (s *TerminatedState) Name() string {
+	return "TerminatedState"
+}
+
+func (s *TerminatedState) IsTerminated() bool {
+	return true
+}
 
 func (s *TerminatedState) Enter(ctx *DialogContext) {
 	// 初始化终止状态

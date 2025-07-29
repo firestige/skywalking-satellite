@@ -19,3 +19,7 @@ type Connection struct {
 type WithConnection interface {
 	Connection() *Connection
 }
+
+type SessionListener interface {
+	OnRequest(req SipRequest, ua UAType)
+}

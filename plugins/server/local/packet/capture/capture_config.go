@@ -23,6 +23,7 @@ type CaptureConfig struct {
 	FlushTimeout time.Duration             `mapstructure:"flush_timeout" yaml:"flush_timeout" validate:"min=-10ms,max=30s" json:"flush_timeout"` // 超时时间
 	TCPChanSize  int                       `mapstructure:"tcp_chan_size" yaml:"tcp_chan_size" validate:"min=1,max=10000" json:"tcp_chan_size"`   // TCP通道大小
 	UDPChanSize  int                       `mapstructure:"udp_chan_size" yaml:"udp_chan_size" validate:"min=1,max=10000" json:"udp_chan_size"`   // UDP通道大小
+	LocalIP      string                    `mapstructure:"local_ip" yaml:"local_ip" validate:"ip" json:"local_ip"`                               // 本地IP地址
 	Filter       []bpf.RawInstruction      `mapstructure:"filter" yaml:"filter" validate:"max=100" json:"filter"`                                // 过滤规则
 	handler      func(*types.RawFrameData) `validate:"-" json:"-"`                                                                               // 数据处理函数
 }

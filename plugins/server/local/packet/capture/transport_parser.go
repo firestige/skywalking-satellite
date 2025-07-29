@@ -22,7 +22,7 @@ func parseTransportLayers(packet gopacket.Packet, frame *types.RawFrameData) {
 
 	ip4 := ipLayer.(*layers.IPv4)
 	frame.Packet = packet
-	frame.Timestamp = packet.Metadata().Timestamp.UnixNano()
+	frame.Timestamp = packet.Metadata().Timestamp.UnixNano() / 1e6 // 转换为毫秒
 	frame.Meta = make(map[string]string)
 	frame.Connection = types.Connection{
 		SrcHost:  ip4.SrcIP.String(),

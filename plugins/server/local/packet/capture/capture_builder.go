@@ -86,6 +86,11 @@ func (b *NetworkCaptureBuilder) WithUDPChanSize(size int) *NetworkCaptureBuilder
 	return b
 }
 
+func (b *NetworkCaptureBuilder) WithLocalIP(ip string) *NetworkCaptureBuilder {
+	b.config.LocalIP = ip
+	return b
+}
+
 // Build 构建DataSource
 func (b *NetworkCaptureBuilder) Build() (types.DataSource, error) {
 	// TODO 完善配置验证

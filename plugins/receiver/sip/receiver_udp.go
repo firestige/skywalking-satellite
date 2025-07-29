@@ -18,8 +18,7 @@ func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 	data := sipLayer.LayerContents()
 	goSipMsg, err := r.sipParser.Parse(data)
 	if err != nil {
-		log.Logger.WithError(err).Debugf("failed to parse SIP message: %s", data)
-		// bad packet, ignore and continue, need statistics
+		// TODO bad packet, ignore and continue, need statistics
 		return nil
 	}
 
