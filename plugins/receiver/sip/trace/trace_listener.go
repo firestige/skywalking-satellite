@@ -51,7 +51,11 @@ func (l *TraceListener) initContext(req types.SipRequest, uaType types.UAType) {
 
 // TODO 根据实际情况修改
 func GetTraceIDFromRequest(req types.SipRequest) string {
-	return req.CallID()
+	if traceId, exist := req.Headers()[string(types.HeaderNameX_ICC_CALL_ID)]; !exist {
+		return req.CallID()
+	} else {
+		return traceId // 假设只有一个值
+	}
 }
 
 func (l *TraceListener) OnDialogCreated(dialog types.Dialog) {

@@ -42,16 +42,21 @@ func (ctx *TransactionContext) HandleMessage(msg types.SipMessage) error {
 	if err != nil {
 		return err
 	}
+
 	ctx.transitionTo(newState)
 	return nil
 }
 
 func (ctx *TransactionContext) transitionTo(newState TransactionState) {
-	currentState := ctx.state
+	currentStateName := ctx.state.Name()
+	newStateName := newState.Name()
 	ctx.state.Exit(ctx)
 	ctx.state = newState
 	newState.Enter(ctx)
-	log.Logger.WithField("Transaction-ID", ctx.ID()).Infof("Transitioned transaction state, from %s to %s", currentState.Name(), newState.Name())
+	if currentStateName != newStateName {
+		ctx.updatedAt = utils.CurrentTimeMillis() // 更新更新时间
+	}
+	log.Logger.WithField("Transaction-ID", ctx.ID()).Infof("Transitioned transaction state, from %s to %s", currentStateName, newStateName)
 }
 
 func (ctx *TransactionContext) StartTimer(name TimerName, span TimerSpan) {

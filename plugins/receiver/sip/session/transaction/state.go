@@ -36,10 +36,12 @@ func (s *NonInviteTryingState) HandleMessage(ctx *TransactionContext, msg types.
 	if resp, ok := msg.(types.SipResponse); ok {
 		if utils.IsProvisionalResponse(resp) {
 			// 1xx响应，进入Proceeding
+			ctx.lastResponse = resp
 			return &NonInviteProceedingState{}, nil
 		}
 		if utils.IsFinalResponse(resp) {
 			// 最终响应，进入Complete
+			ctx.lastResponse = resp
 			next := &NonInviteCompletedState{}
 			return next, nil
 		}
@@ -71,6 +73,7 @@ func (s *NonInviteProceedingState) HandleMessage(ctx *TransactionContext, msg ty
 		if utils.IsFinalResponse(resp) {
 			// 最终响应，进入Completed
 			next := &NonInviteCompletedState{}
+			ctx.lastResponse = resp
 			return next, nil
 		}
 	}
@@ -160,14 +163,17 @@ func (s *InviteCallingState) HandleMessage(ctx *TransactionContext, msg types.Si
 	if resp, ok := msg.(types.SipResponse); ok {
 		if utils.IsProvisionalResponse(resp) {
 			// 收到/发出1xx响应，进入Proceeding
+			ctx.lastResponse = resp
 			return &InviteProceedingState{}, nil
 		}
 		if utils.Is2XXResponse(resp) {
 			// 收到/发出最终响应，进入Terminated
+			ctx.lastResponse = resp
 			return &InviteTerminatedState{}, nil
 		}
 		if utils.IsNon2XXFinalResponse(resp) {
 			// 收到/发出非2xx最终响应，进入Completed
+			ctx.lastResponse = resp
 			return &InviteCompletedState{}, nil
 		}
 	}
@@ -197,14 +203,17 @@ func (s *InviteProceedingState) HandleMessage(ctx *TransactionContext, msg types
 	if resp, ok := msg.(types.SipResponse); ok {
 		if utils.IsProvisionalResponse(resp) {
 			// 收到1xx响应，保持Proceeding
+			ctx.lastResponse = resp
 			return s, nil
 		}
 		if utils.Is2XXResponse(resp) {
 			// 收到2xx响应，进入Terminated
+			ctx.lastResponse = resp
 			return &InviteTerminatedState{}, nil
 		}
 		if utils.IsNon2XXFinalResponse(resp) {
 			// 收到非2xx最终响应，进入Terminated
+			ctx.lastResponse = resp
 			return &InviteCompletedState{}, nil
 		}
 	}
