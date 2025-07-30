@@ -1,14 +1,13 @@
 package sip
 
 import (
-	"encoding/binary"
+	"bytes"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	sip "github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
 	packet "github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/sirupsen/logrus"
 )
 
 func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
@@ -20,9 +19,10 @@ func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 		data = r.getUdpPayload(p)
 	}
 	if len(data) == 0 {
-		log.Logger.Debugf("No SIP data found in packet: %s", p)
+		log.Logger.Tracef("No SIP data found in packet: %s", p)
 		return nil
 	}
+	data = r.attempToSkipUnwantedData(data)
 	goSipMsg, err := r.sipParser.Parse(data)
 	if err != nil {
 		// TODO bad packet, ignore and continue, need statistics
@@ -61,6 +61,22 @@ func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 	return nil
 }
 
+func (r *Receiver) attempToSkipUnwantedData(data []byte) []byte {
+	// 找到首行的CRLF
+	if i := bytes.Index(data, []byte{'\r', '\n'}); i != -1 {
+		log.Logger.Tracef("find first line: %s", data[:i])
+		// 找到首行的左边界，左边界是首行的第一个可显大写字符，一般是SipMethod的第一个字符
+		for j := 0; j < i; j++ {
+			switch data[j] {
+			case 'I', 'A', 'O', 'B', 'C', 'E', 'P', 'S', 'N', 'U', 'R', 'M':
+				log.Logger.Tracef("skip %d bytes.", j)
+				return data[j:] // 返回首行之后的数据
+			}
+		}
+	}
+	return data
+}
+
 func (r *Receiver) extraSIPByGoPacket(p gopacket.Packet) []byte {
 	sipLayer := p.Layer(layers.LayerTypeSIP)
 	if sipLayer == nil {
@@ -74,25 +90,27 @@ func (r *Receiver) extraSIPByGoPacket(p gopacket.Packet) []byte {
 }
 
 func (r *Receiver) getUdpPayload(p gopacket.Packet) []byte {
-	udpLayer := p.Layer(layers.LayerTypeUDP)
-	if udpLayer == nil {
-		return nil
-	}
-	data := p.ApplicationLayer().Payload()
-	if len(data) == 0 {
-		data = udpLayer.LayerPayload()
+	l := len(p.Data())
+	log.Logger.Tracef("direct Extracting App payload from packet{len:%d}", l)
+	var data []byte
+	if layer := p.ApplicationLayer(); layer != nil {
+		data = layer.Payload()
 	}
 	if len(data) == 0 {
-		return nil
+		log.Logger.Tracef("No application layer data found in packet{len: %d}", l)
+		if layer := p.TransportLayer(); layer != nil {
+			data = layer.LayerPayload()
+		}
 	}
-	if log.Logger.IsLevelEnabled(logrus.DebugLevel) {
-		header := udpLayer.LayerContents()
-		srcPort := binary.BigEndian.Uint16(header[0:2])
-		dstPort := binary.BigEndian.Uint16(header[2:4])
-		length := binary.BigEndian.Uint16(header[4:6])
-		checksum := binary.BigEndian.Uint16(header[6:8])
-		log.Logger.Debugf("UDP packet: srcPort=%d, dstPort=%d, length=%d, checksum=%d", srcPort, dstPort, length, checksum)
-		log.Logger.Debugf("UDP packet actual has: %d(inclue frame header)", len(data)+8)
+	if len(data) == 0 {
+		log.Logger.Tracef("No transport layer data found in packet{len: %d}", l)
+		if udpLayer := p.Layer(layers.LayerTypeUDP); udpLayer != nil {
+			data = udpLayer.LayerPayload()
+		}
+	}
+	if len(data) == 0 {
+		log.Logger.Tracef("No UDP payload found in packet{len: %d}", l)
+		data = p.Layer(layers.LayerTypeIPv4).LayerPayload()[8:] // Skip UDP header (8 bytes)
 	}
 	return data // Skip UDP header (8 bytes)
 }
