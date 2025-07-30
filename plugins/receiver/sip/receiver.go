@@ -64,6 +64,7 @@ func (r *Receiver) RegisterHandler(server interface{}) {
 		r.OutputChannel <- data
 	}
 	r.handler.RegisterListener(trace.NewTraceListener(r.ServiceName, r.ServiceInstance, submit))
+	log.Logger.Infof("SIP Receiver initialized with service name: %s, instance: %s, ports: %s", r.ServiceName, r.ServiceInstance, r.Ports)
 	r.Server.RegisterHandler(layers.IPProtocolTCP, r.Ports, fmt.Sprintf("%s-TCP", r.ServiceName), r.processTCPFrame)
 	r.Server.RegisterHandler(layers.IPProtocolUDP, r.Ports, fmt.Sprintf("%s-UDP", r.ServiceName), r.processUDPFrame)
 }

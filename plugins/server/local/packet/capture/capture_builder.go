@@ -8,6 +8,7 @@ import (
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
+	"github.com/apache/skywalking-satellite/plugins/server/local/packet/utils"
 )
 
 // NetworkCaptureBuilder 构建器
@@ -97,6 +98,14 @@ func (b *NetworkCaptureBuilder) Build() (types.DataSource, error) {
 	if b.config.Interface == "" {
 		return nil, fmt.Errorf("interface is required")
 	}
+
+	compiler := utils.NewBPFCompiler(b.config.SnapLen)
+	filter, err := compiler.CompileFilter(b.bpfFilter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile BPF filter: %w", err)
+	}
+	b.config.Filter = filter
+
 	if err := b.config.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}

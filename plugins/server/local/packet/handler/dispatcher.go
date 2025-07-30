@@ -14,12 +14,14 @@ type dispatcher struct {
 
 func (d *dispatcher) Handle(frame *types.RawFrameData) error {
 	protocol := frame.Connection.Protocol
-	log.Logger.WithField("protocol", fmt.Sprintf("%v", protocol)).Debug("Dispatching frame")
+	src := fmt.Sprintf("%s:%d", frame.Connection.SrcHost, frame.Connection.SrcPort)
+	dst := fmt.Sprintf("%s:%d", frame.Connection.DstHost, frame.Connection.DstPort)
+	log.Logger.Tracef("Dispatching frame: {protocol: %s, src: %s, dst: %s}", protocol, src, dst)
 	var handler types.FrameHandler
 	var exists bool
 	if handler, exists = d.manager.GetHandler(protocol, frame.Connection.SrcPort); !exists {
 		if handler, exists = d.manager.GetHandler(protocol, frame.Connection.DstPort); !exists {
-			log.Logger.WithField("protocol", protocol).Warn("No handler found for protocol")
+			log.Logger.Debugf("No handler found for frame: {protocol: %s, src: %s, dst: %s}", protocol, src, dst)
 			return fmt.Errorf("no handler found for protocol: %s", protocol)
 		}
 	}

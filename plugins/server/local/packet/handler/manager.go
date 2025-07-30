@@ -156,7 +156,6 @@ func (m *Manager) GetHandler(protocol layers.IPProtocol, port int) (types.FrameH
 			return handler, true
 		}
 	}
-	log.Logger.Debugf("No handler found for protocol %s and port %d", protocol, port)
 	return nil, false
 }
 

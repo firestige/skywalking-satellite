@@ -6,6 +6,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/afpacket"
 	"github.com/google/gopacket/layers"
+	"github.com/sirupsen/logrus"
 )
 
 // captureLoop 主抓包循环
@@ -35,8 +36,11 @@ func (nc *networkCapture) captureLoop() {
 				log.Logger.Info("Packet source closed")
 				return
 			}
-
-			log.Logger.Debugf("Captured packet: %s", packet)
+			if log.Logger.IsLevelEnabled(logrus.TraceLevel) {
+				log.Logger.Tracef("Captured packet: %s", packet)
+			} else if log.Logger.IsLevelEnabled(logrus.DebugLevel) {
+				log.Logger.Debugf("Captured packet: len=%d, src=%s, dst=%s, layers=%d", len(packet.Data()), packet.NetworkLayer().NetworkFlow().Src().String(), packet.NetworkLayer().NetworkFlow().Dst().String(), len(packet.Layers()))
+			}
 			if packet == nil {
 				continue
 			}
@@ -75,7 +79,7 @@ func (nc *networkCapture) refreshDirection(frame *types.RawFrameData) {
 			frame.Direction = types.Inbound
 			return
 		}
-		log.Logger.Warnf("Cannot determine direction for frame: %v", frame)
+		log.Logger.Tracef("Cannot determine direction for frame: {src:%s:%d, dst:%s:%d}", srcIP, frame.Connection.SrcPort, dstIP, frame.Connection.DstPort)
 	}
 }
 
