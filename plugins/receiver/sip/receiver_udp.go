@@ -16,13 +16,16 @@ func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 	p := frame.Packet
 	data := r.extraSIPByGoPacket(p)
 	if len(data) == 0 {
-		data = r.getUdpPayload(p)
+		var udp []byte
+		data, udp = r.getUdpPayload(p)
+		srcPort, dstPort := ParseUDPHeaderPorts(udp)
+		frame.Connection.SrcPort = srcPort
+		frame.Connection.DstPort = dstPort
 	}
 	if len(data) == 0 {
 		log.Logger.Tracef("No SIP data found in packet: %s", p)
 		return nil
 	}
-	data = r.attempToSkipUnwantedData(data)
 	goSipMsg, err := r.sipParser.Parse(data)
 	if err != nil {
 		// TODO bad packet, ignore and continue, need statistics
@@ -61,7 +64,7 @@ func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 	return nil
 }
 
-func (r *Receiver) attempToSkipUnwantedData(data []byte) []byte {
+func (r *Receiver) attempToSkipUnwantedData(data []byte) ([]byte, int) {
 	// 找到首行的CRLF
 	if i := bytes.Index(data, []byte{'\r', '\n'}); i != -1 {
 		log.Logger.Tracef("find first line: %s", data[:i])
@@ -70,11 +73,11 @@ func (r *Receiver) attempToSkipUnwantedData(data []byte) []byte {
 			switch data[j] {
 			case 'I', 'A', 'O', 'B', 'C', 'E', 'P', 'S', 'N', 'U', 'R', 'M':
 				log.Logger.Tracef("skip %d bytes.", j)
-				return data[j:] // 返回首行之后的数据
+				return data[j:], j // 返回首行之后的数据
 			}
 		}
 	}
-	return data
+	return data, 0
 }
 
 func (r *Receiver) extraSIPByGoPacket(p gopacket.Packet) []byte {
@@ -89,7 +92,7 @@ func (r *Receiver) extraSIPByGoPacket(p gopacket.Packet) []byte {
 	return data
 }
 
-func (r *Receiver) getUdpPayload(p gopacket.Packet) []byte {
+func (r *Receiver) getUdpPayload(p gopacket.Packet) ([]byte, []byte) {
 	l := len(p.Data())
 	log.Logger.Tracef("direct Extracting App payload from packet{len:%d}", l)
 	var data []byte
@@ -112,5 +115,16 @@ func (r *Receiver) getUdpPayload(p gopacket.Packet) []byte {
 		log.Logger.Tracef("No UDP payload found in packet{len: %d}", l)
 		data = p.Layer(layers.LayerTypeIPv4).LayerPayload()[8:] // Skip UDP header (8 bytes)
 	}
-	return data // Skip UDP header (8 bytes)
+	sipData, i := r.attempToSkipUnwantedData(data) // Skip UDP header (8 bytes)
+	udpHeaderBytes := data[:i]
+	return sipData, udpHeaderBytes
+}
+
+func ParseUDPHeaderPorts(udpHeaderBytes []byte) (srcPort, dstPort int) {
+	if len(udpHeaderBytes) < 4 {
+		return 0, 0 // 长度不足，无法解析
+	}
+	srcPort = int(udpHeaderBytes[0])<<8 | int(udpHeaderBytes[1])
+	dstPort = int(udpHeaderBytes[2])<<8 | int(udpHeaderBytes[3])
+	return srcPort, dstPort
 }

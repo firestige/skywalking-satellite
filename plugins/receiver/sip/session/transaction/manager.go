@@ -40,6 +40,7 @@ func (m *TransactionManager) CreateTransaction(msg types.SipMessage) *Transactio
 		}
 		if state == nil {
 			log.Logger.WithField("Call-id", req.CallID()).WithField("ua", ua).Errorf("Unsupported request msg: %s", req.StartLine())
+			return nil
 		}
 		tx := NewTransaction(req, state)
 		m.store[tx.ID()] = tx
