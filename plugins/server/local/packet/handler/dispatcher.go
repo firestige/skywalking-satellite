@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
@@ -21,8 +22,12 @@ func (d *dispatcher) Handle(frame *types.RawFrameData) error {
 	var exists bool
 	if handler, exists = d.manager.GetHandler(protocol, frame.Connection.SrcPort); !exists {
 		if handler, exists = d.manager.GetHandler(protocol, frame.Connection.DstPort); !exists {
-			log.Logger.Debugf("No handler found for frame: {protocol: %s, src: %s, dst: %s}", protocol, src, dst)
-			return fmt.Errorf("no handler found for protocol: %s", protocol)
+			log.Logger.Tracef("No handler found for frame: {protocol: %s, src: %s, dst: %s}, fallback to default", protocol, src, dst)
+			if handler, exists = d.manager.GetDefaultHandlerByProtocol(protocol); !exists {
+				msg := fmt.Sprintf("No handler found for frame: {protocol: %s, src: %s, dst: %s}", protocol, src, dst)
+				log.Logger.Error(msg)
+				return errors.New(msg)
+			}
 		}
 	}
 	handler.Handle(frame)

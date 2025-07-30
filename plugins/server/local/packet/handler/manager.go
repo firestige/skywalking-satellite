@@ -159,6 +159,15 @@ func (m *Manager) GetHandler(protocol layers.IPProtocol, port int) (types.FrameH
 	return nil, false
 }
 
+func (m *Manager) GetDefaultHandlerByProtocol(protocol layers.IPProtocol) (types.FrameHandler, bool) {
+	for _, mapping := range m.handlerMappings {
+		if mapping.protocol == protocol {
+			return mapping.handler, true
+		}
+	}
+	return nil, false
+}
+
 // GetHandlerByName returns a handler by its name
 func (m *Manager) GetHandlerByName(name string) (*HandlerMapping, bool) {
 	mapping, exists := m.handlerMappings[name]

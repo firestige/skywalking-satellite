@@ -78,17 +78,21 @@ func (r *Receiver) getUdpPayload(p gopacket.Packet) []byte {
 	if udpLayer == nil {
 		return nil
 	}
-	data := udpLayer.LayerContents()
+	data := p.ApplicationLayer().Payload()
+	if len(data) == 0 {
+		data = udpLayer.LayerPayload()
+	}
 	if len(data) == 0 {
 		return nil
 	}
 	if log.Logger.IsLevelEnabled(logrus.DebugLevel) {
-		srcPort := binary.BigEndian.Uint16(data[0:2])
-		dstPort := binary.BigEndian.Uint16(data[2:4])
-		length := binary.BigEndian.Uint16(data[4:6])
-		checksum := binary.BigEndian.Uint16(data[6:8])
+		header := udpLayer.LayerContents()
+		srcPort := binary.BigEndian.Uint16(header[0:2])
+		dstPort := binary.BigEndian.Uint16(header[2:4])
+		length := binary.BigEndian.Uint16(header[4:6])
+		checksum := binary.BigEndian.Uint16(header[6:8])
 		log.Logger.Debugf("UDP packet: srcPort=%d, dstPort=%d, length=%d, checksum=%d", srcPort, dstPort, length, checksum)
-		log.Logger.Debugf("UDP packet actual has: %d(inclue frame header)", len(data))
+		log.Logger.Debugf("UDP packet actual has: %d(inclue frame header)", len(data)+8)
 	}
-	return data[8:] // Skip UDP header (8 bytes)
+	return data // Skip UDP header (8 bytes)
 }

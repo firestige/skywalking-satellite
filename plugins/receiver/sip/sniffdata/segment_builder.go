@@ -68,9 +68,9 @@ func (b *SegmentBuilder) Build() *agent.SegmentObject {
 
 func WrapWithSniffData(segment *agent.SegmentObject) *v1.SniffData {
 	startTime := segment.Spans[0].StartTime
-	// 按照约定把TraceID加上SNIFF-前缀
+	// 按照约定把TraceID加上SNIFFER-前缀
 	if segment.TraceId != "" {
-		segment.TraceId = "SNIFF-" + segment.TraceId
+		segment.TraceId = "SNIFFER-" + segment.TraceId
 	}
 	//  如果span[0]的endtime<span[len-1].endtime，则使用span[len-1]的endtime替换span[0]的endtime
 	if len(segment.Spans) > 0 && segment.Spans[0].EndTime < segment.Spans[len(segment.Spans)-1].EndTime {
@@ -211,7 +211,7 @@ func (b *SpanBuilder) WithHeaders(headers map[string]string) *SpanBuilder {
 	// 将Headers转换为标签
 	for key, value := range headers {
 		b.Tags = append(b.Tags, &common.KeyStringValuePair{
-			Key:   "sip.header." + key,
+			Key:   key,
 			Value: value,
 		})
 	}

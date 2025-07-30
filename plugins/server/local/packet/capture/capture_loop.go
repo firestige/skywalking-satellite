@@ -24,7 +24,7 @@ func (nc *networkCapture) captureLoop() {
 
 	packetSource := gopacket.NewPacketSource(nc.handle, layers.LinkTypeEthernet)
 	packetSource.DecodeOptions.Lazy = true
-	packetSource.DecodeOptions.NoCopy = false
+	packetSource.DecodeOptions.NoCopy = true
 
 	for {
 		select {
