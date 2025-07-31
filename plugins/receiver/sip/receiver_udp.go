@@ -65,15 +65,35 @@ func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 }
 
 func (r *Receiver) attempToSkipUnwantedData(data []byte) ([]byte, int) {
+	// SIP方法名集合，全部用sip定义的常量
+	methods := [][]byte{
+		[]byte(sip.MethodInvite),
+		[]byte(sip.MethodAck),
+		[]byte(sip.MethodOptions),
+		[]byte(sip.MethodBye),
+		[]byte(sip.MethodCancel),
+		[]byte(sip.MethodRegister),
+		[]byte(sip.MethodMessage),
+		[]byte(sip.MethodSubscribe),
+		[]byte(sip.MethodNotify),
+		[]byte(sip.MethodUpdate),
+		[]byte(sip.MethodRefer),
+		[]byte(sip.MethodInfo),
+		[]byte(sip.MethodPrack),
+		[]byte(sip.MethodPublish),
+	}
 	// 找到首行的CRLF
-	if i := bytes.Index(data, []byte{'\r', '\n'}); i != -1 {
-		log.Logger.Tracef("find first line: %s", data[:i])
-		// 找到首行的左边界，左边界是首行的第一个可显大写字符，一般是SipMethod的第一个字符
-		for j := 0; j < i; j++ {
-			switch data[j] {
-			case 'I', 'A', 'O', 'B', 'C', 'E', 'P', 'S', 'N', 'U', 'R', 'M':
-				log.Logger.Tracef("skip %d bytes.", j)
-				return data[j:], j // 返回首行之后的数据
+	crlfIdx := bytes.Index(data, []byte{'\r', '\n'})
+	if crlfIdx == -1 {
+		return data, 0
+	}
+	// 在首行范围内查找方法名
+	firstLine := data[:crlfIdx]
+	for i := 0; i < len(firstLine); i++ {
+		for _, method := range methods {
+			if i+len(method) <= len(firstLine) && bytes.Equal(firstLine[i:i+len(method)], method) {
+				log.Logger.Tracef("skip %d bytes.", i)
+				return data[i:], i // 返回首行之后的数据
 			}
 		}
 	}
