@@ -3,6 +3,7 @@ package types
 type Direction string
 
 const (
+	DirectionUnknown  Direction = "unknown"
 	DirectionInbound  Direction = "inbound"
 	DirectionOutbound Direction = "outbound"
 )

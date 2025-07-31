@@ -32,36 +32,36 @@ func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 		return nil
 	}
 
-	// 转换消息
-	var protocol string
-	switch frame.Connection.Protocol {
-	case layers.IPProtocolUDP:
-		protocol = "UDP"
-	case layers.IPProtocolTCP:
-		protocol = "TCP"
-	default:
-		protocol = "Unknown"
-	}
-	var direction sip.Direction
-	switch frame.Direction {
-	case packet.Inbound:
-		direction = sip.DirectionInbound
-	case packet.Outbound:
-		direction = sip.DirectionOutbound
-	}
+	// TODO 抓包程序不再判断inbound或者outbound，由recevier判断
+
+	direction := r.analyseDirection(frame.Connection)
 
 	conn := &sip.Connection{
 		SrcIp:     frame.Connection.SrcHost,
 		SrcPort:   frame.Connection.SrcPort,
 		DstIp:     frame.Connection.DstHost,
 		DstPort:   frame.Connection.DstPort,
-		Protocol:  protocol,
+		Protocol:  "UDP",
 		Direction: direction,
 	}
+
+	log.Logger.Tracef("Received SIP message: %s, from %s:%d to %s:%d",
+		goSipMsg.StartLine(), conn.SrcIp, conn.SrcPort, conn.DstIp, conn.DstPort)
+
 	sipMsg := FromGoSip(goSipMsg, conn, frame.Timestamp)
 
 	r.handler.HandleMessage(sipMsg)
 	return nil
+}
+
+func (r *Receiver) analyseDirection(conn packet.Connection) sip.Direction {
+	if conn.SrcHost == r.LocalIp {
+		return sip.DirectionOutbound
+	} else if conn.DstHost == r.LocalIp {
+		return sip.DirectionInbound
+	}
+	log.Logger.Warnf("Unknown direction for connection: %s", conn)
+	return sip.DirectionUnknown
 }
 
 func (r *Receiver) attempToSkipUnwantedData(data []byte) ([]byte, int) {

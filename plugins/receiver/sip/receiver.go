@@ -26,6 +26,7 @@ type Receiver struct {
 	config.CommonFields
 	ServiceName     string `mapstructure:"service_name"`     // 服务名称
 	ServiceInstance string `mapstructure:"service_instance"` // 服务实例
+	LocalIp         string `mapstructure:"local_ip"`         // 本地IP地址，接收SIP消息的IP地址
 	Ports           string `mapstructure:"ports"`            // 监听的端口列表，逗号分隔
 
 	OutputChannel chan *v1.SniffData
@@ -50,6 +51,7 @@ func (r *Receiver) DefaultConfig() string {
 	return `
 service_name: "SIP Service"
 service_instance: "SIP Instance"
+local_ip: "127.0.0.1"
 ports: "5060,5061" # 监听的端口列表，逗号分隔
 `
 }
