@@ -1,0 +1,79 @@
+@startuml
+title Server装配Pipeline时序图
+
+participant "Client" as C
+participant "Server" as S
+participant "FilterBuilder" as FB
+participant "NetworkCaptureBuilder" as NCB
+participant "DispatcherBuilder" as DB
+participant "PipelineBuilder" as PB
+participant "Pipeline" as P
+
+C -> S: Start()
+activate S
+
+S -> S: buildPipeline()
+activate S
+
+note over S: 转换Ports []int -> []uint32
+
+S -> FB: NewFilterBuilder()
+activate FB
+S -> FB: IPv4OrDrop()
+S -> FB: TCP(JumpToIfNoMatch("check_udp"))
+S -> FB: PortsOrAccept(portsUint32, "check_udp")
+S -> FB: UDP(WithLabel("check_udp").OrDrop())
+S -> FB: PortsOrDrop(portsUint32)
+S -> FB: Accept()
+S -> FB: Drop()
+S -> FB: Compile()
+FB --> S: bpfFilter
+deactivate FB
+
+S -> NCB: NewNetworkCaptureBuilder()
+activate NCB
+S -> NCB: WithInterface(s.Interface)
+S -> NCB: WithBPFFilter(bpfFilter)
+S -> NCB: WithRingSize(s.RingSize)
+S -> NCB: WithWorkerCount(s.WorkerCount)
+S -> NCB: WithMTU(s.MTU)
+S -> NCB: WithLocalAddresses(s.LocalAddresses)
+S -> NCB: Build()
+NCB --> S: dataSource
+deactivate NCB
+
+S -> DB: NewDispatcherBuilder()
+activate DB
+loop for each protocol and handler
+    S -> DB: WithHandler(protocol, name, handler)
+end
+S -> DB: Build()
+DB --> S: dispatcher
+deactivate DB
+
+S -> PB: NewPipelineBuilder(dispatcher)
+activate PB
+S -> PB: WithSource(dataSource)
+S -> PB: Build()
+PB --> S: pipeline
+deactivate PB
+
+S --> S: pipeline
+deactivate S
+
+S -> S: ctx, cancel = context.WithCancel()
+S -> P: Prepare(ctx)
+activate P
+P --> S: success
+deactivate P
+
+S -> P: Start()
+activate P
+P --> S: success
+note over P: Pipeline开始运行
+deactivate P
+
+S --> C: success
+deactivate S
+
+@enduml

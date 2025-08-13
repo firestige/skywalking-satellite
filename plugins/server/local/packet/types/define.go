@@ -1,7 +1,6 @@
 package types
 
 import (
-	"context"
 	"time"
 
 	"github.com/google/gopacket"
@@ -15,18 +14,21 @@ const (
 	ESL = "ESL"
 )
 
-type Lifecycle interface {
-	Prepare(ctx context.Context) error
-	Start() error
-	Close() error
-}
+// Direction represents packet direction
+type Direction string
+
+const (
+	Inbound  Direction = "inbound"
+	Outbound Direction = "outbound"
+	Unknown  Direction = "unknown"
+)
 
 type RawFrameData struct {
-	Data       []byte
+	Packet     gopacket.Packet // 原始数据包
 	Meta       map[string]string
 	Connection Connection
 	Timestamp  int64
-	Direction  string // "inbound" or "outbound"
+	Direction  Direction // "inbound" or "outbound"
 }
 
 var EmptyRawFrameData = &RawFrameData{}
@@ -34,9 +36,9 @@ var EmptyRawFrameData = &RawFrameData{}
 type Connection struct {
 	SrcHost  string
 	SrcPort  int
-	DestHost string
+	DstHost  string
 	DstPort  int
-	Protocol string
+	Protocol layers.IPProtocol
 }
 
 // PacketInfo 包信息
@@ -52,11 +54,9 @@ type PacketInfo struct {
 }
 
 type DataSource interface {
-	Lifecycle
-	Fetch() (*RawFrameData, error)
-}
-
-type PacketStream interface {
+	Prepare() error
+	Start() error
+	Close() error
 }
 
 type FrameFilter interface {

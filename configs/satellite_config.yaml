@@ -18,7 +18,7 @@
 # The logger configuration.
 logger:
   # The log format pattern configuration.
-  log_pattern: ${SATELLITE_LOGGER_LOG_PATTERN:%time [%level][%field] - %msg}
+  log_pattern: ${SATELLITE_LOGGER_LOG_PATTERN:%time[%caller][%func][%goroutine][%level][%field] - %msg}
   # The time format pattern configuration.
   time_pattern: ${SATELLITE_LOGGER_TIME_PATTERN:2006-01-02 15:04:05.000}
   # The lowest level of printing allowed.

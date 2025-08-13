@@ -1,8 +1,7 @@
 package sip
 
 import (
-	"strconv"
-	"time"
+	"fmt"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/config"
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
@@ -10,12 +9,10 @@ import (
 	forwarder "github.com/apache/skywalking-satellite/plugins/forwarder/api"
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativelog"
 	"github.com/apache/skywalking-satellite/plugins/forwarder/grpc/nativetracing"
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip/session"
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip/trace"
 	"github.com/apache/skywalking-satellite/plugins/server/local/packet"
-	"github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
-	"google.golang.org/protobuf/proto"
-	common "skywalking.apache.org/repo/goapi/collect/common/v3"
-	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
-	logging "skywalking.apache.org/repo/goapi/collect/logging/v3"
+	"github.com/google/gopacket/layers"
 	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
 )
 
@@ -29,11 +26,13 @@ type Receiver struct {
 	config.CommonFields
 	ServiceName     string `mapstructure:"service_name"`     // 服务名称
 	ServiceInstance string `mapstructure:"service_instance"` // 服务实例
+	LocalIp         string `mapstructure:"local_ip"`         // 本地IP地址，接收SIP消息的IP地址
+	Ports           string `mapstructure:"ports"`            // 监听的端口列表，逗号分隔
 
-	OutputChannel  chan *v1.SniffData
-	Server         *packet.Server
-	sipParser      *SipParser
-	sessionManager SipSessionManager
+	OutputChannel chan *v1.SniffData
+	Server        *packet.Server
+	sipParser     *SipParser
+	handler       *session.SessionHandler
 }
 
 func (r *Receiver) Name() string {
@@ -52,75 +51,82 @@ func (r *Receiver) DefaultConfig() string {
 	return `
 service_name: "SIP Service"
 service_instance: "SIP Instance"
+local_ip: "127.0.0.1"
+ports: "5060,5061" # 监听的端口列表，逗号分隔
 `
 }
 
 func (r *Receiver) RegisterHandler(server interface{}) {
 	r.Server = server.(*packet.Server)
-	r.OutputChannel = make(chan *v1.SniffData, 1000)
+	r.OutputChannel = make(chan *v1.SniffData, 10000)
 	r.sipParser = NewSipParser()
-	config := &SessionManagerConfig{
-		ServiceName:     r.ServiceName,
-		ServiceInstance: r.ServiceInstance,
-
-		SessionTTL:      5 * time.Minute, // 会话过期时间
-		CleanupInterval: 1 * time.Minute, // 自动清理间隔
+	r.handler = session.NewSessionHandler()
+	submit := func(data *v1.SniffData) {
+		log.Logger.Debugf("Submitting data: %s", data.Name)
+		r.OutputChannel <- data
 	}
-	r.sessionManager = NewSessionManager(*config)
-	r.Server.RegisterHandler("UDP", "sip", r.packetHandler)
+	r.handler.RegisterListener(trace.NewTraceListener(r.ServiceName, r.ServiceInstance, submit))
+	log.Logger.Infof("SIP Receiver initialized with service name: %s, instance: %s, ports: %s", r.ServiceName, r.ServiceInstance, r.Ports)
+	r.Server.RegisterHandler(layers.IPProtocolTCP, r.Ports, fmt.Sprintf("%s-TCP", r.ServiceName), r.processTCPFrame)
+	r.Server.RegisterHandler(layers.IPProtocolUDP, r.Ports, fmt.Sprintf("%s-UDP", r.ServiceName), r.processUDPFrame)
 }
 
 func (r *Receiver) RegisterSyncInvoker(_ module.SyncInvoker) {
 	// No sync invoker needed for SIP receiver
 }
 
-func (r *Receiver) packetHandler(data *types.RawFrameData) error {
-	// 解析SIP消息
-	sipMessage, err := r.sipParser.Parse(data.Data)
-	if err != nil {
-		log.Logger.Error("failed to parse SIP message:", err)
-		return err
-	}
+// func (r *Receiver) packetHandler(data *types.RawFrameData) error {
+// 	// 解析SIP消息
+// 	sipMessage, err := r.sipParser.Parse(data.Data)
+// 	if err != nil {
+// 		log.Logger.Error("failed to parse SIP message:", err)
+// 		return err
+// 	}
 
-	session, err := r.sessionManager.GetOrCreateSession(sipMessage)
+// 	session, err := r.sessionManager.GetOrCreateSession(sipMessage)
 
-	// 构建跟踪段
-	segment := r.buildSegment(data, sipMessage, session)
-	if segment == nil {
-		log.Logger.Error("failed to build segment")
-		return err
-	}
+// 	if err != nil {
+// 		log.Logger.Error("failed to get or create session:", err)
+// 		return err
+// 	}
 
-	// 发送跟踪数据
-	traceByte, _ := proto.Marshal(segment)
-	traceData := &v1.SniffData{
-		Name:      "sip-capture",
-		Timestamp: data.Timestamp,
-		Type:      v1.SniffType_TracingType,
-		Remote:    true,
-		Data: &v1.SniffData_Segment{
-			Segment: traceByte,
-		},
-	}
-	r.OutputChannel <- traceData
+// 	// 构建跟踪段
+// 	segment := r.buildSegment(data, sipMessage, session)
+// 	if segment == nil {
+// 		log.Logger.Error("failed to build segment")
+// 		return err
+// 	}
 
-	// 构建并发送日志数据
-	packet := buildLogData(data, sipMessage, session)
-	packetByte, _ := proto.Marshal(packet)
-	logData := &v1.SniffData{
-		Name:      "sip-log",
-		Timestamp: data.Timestamp,
-		Type:      v1.SniffType_Logging,
-		Remote:    true,
-		Data: &v1.SniffData_LogList{
-			LogList: &v1.BatchLogList{
-				Logs: [][]byte{packetByte},
-			},
-		},
-	}
-	r.OutputChannel <- logData
-	return nil
-}
+// 	// 发送跟踪数据
+// 	traceByte, _ := proto.Marshal(segment)
+// 	traceData := &v1.SniffData{
+// 		Name:      "sip-capture",
+// 		Timestamp: data.Timestamp,
+// 		Type:      v1.SniffType_TracingType,
+// 		Remote:    true,
+// 		Data: &v1.SniffData_Segment{
+// 			Segment: traceByte,
+// 		},
+// 	}
+// 	r.OutputChannel <- traceData
+
+// 	// 构建并发送日志数据
+// 	packet := buildLogData(data, sipMessage, session)
+// 	packetByte, _ := proto.Marshal(packet)
+// 	logData := &v1.SniffData{
+// 		Name:      "sip-log",
+// 		Timestamp: data.Timestamp,
+// 		Type:      v1.SniffType_Logging,
+// 		Remote:    true,
+// 		Data: &v1.SniffData_LogList{
+// 			LogList: &v1.BatchLogList{
+// 				Logs: [][]byte{packetByte},
+// 			},
+// 		},
+// 	}
+// 	r.OutputChannel <- logData
+// 	return nil
+// }
 
 // buildSegment 根据SIP消息构建跟踪段
 // SegmentObjectd的定义如下
@@ -148,137 +154,188 @@ func (r *Receiver) packetHandler(data *types.RawFrameData) error {
 //	  Tags []*KeyStringValuePair // 标签列表,这里将sipMessage的Headers转换为标签,如果sipMessage是Request, 则将Method作为标签
 //	  IsError bool // 是否为错误,如果sipMessage是Response且状态码大于等于400, 则为true, 否则为false
 //	}
-func (r *Receiver) buildSegment(source *types.RawFrameData, sipMessage SipMessage, session *Session) *agent.SegmentObject {
-	// 获取 session 中已经维护好的 segment 对象
-	segment := session.Segment
+// func (r *Receiver) buildSegment(source *types.RawFrameData, sipMessage SipMessage, session *Session) *agent.SegmentObject {
+// 	// 获取 session 中已经维护好的 segment 对象
+// 	segment := session.Segment
 
-	// 获取当前需要处理的 span（按照 session 中的 CurrentSpan 索引）
-	if int(session.CurrentSpan) >= len(segment.Spans) {
-		log.Logger.Errorf("CurrentSpan index %d out of range for spans length %d", session.CurrentSpan, len(segment.Spans))
-		return segment
-	}
+// 	// 获取当前需要处理的 span（按照 session 中的 CurrentSpan 索引）
+// 	if int(session.CurrentSpan) >= len(segment.Spans) {
+// 		log.Logger.Errorf("CurrentSpan index %d out of range for spans length %d", session.CurrentSpan, len(segment.Spans))
+// 		return segment
+// 	}
 
-	currentSpan := segment.Spans[session.CurrentSpan]
+// 	currentSpan := segment.Spans[session.CurrentSpan]
 
-	// 根据消息类型就地修改 span 对象
-	if sipMessage.IsRquest() {
-		// 处理请求消息
-		if req, ok := sipMessage.(SipRequest); ok {
-			// 设置 span 开始时间
-			currentSpan.StartTime = source.Timestamp
+// 	// 根据消息类型就地修改 span 对象
+// 	if sipMessage.IsRquest() {
+// 		// 处理请求消息
+// 		if req, ok := sipMessage.(SipRequest); ok {
+// 			// 设置 span 开始时间
+// 			currentSpan.StartTime = source.Timestamp
 
-			// 设置操作名称（仅在没有值时填入）
-			if currentSpan.OperationName == "" {
-				currentSpan.OperationName = source.Direction + req.RequestLine()
-			}
+// 			// 设置操作名称（仅在没有值时填入）
+// 			if currentSpan.OperationName == "" {
+// 				currentSpan.OperationName = source.Direction + req.RequestLine()
+// 			}
 
-			// 设置 SpanType（判断是 inbound 还是 outbound request）
-			// 这里简化处理，可以根据实际需求调整判断逻辑
-			switch source.Direction {
-			case "inbound":
-				currentSpan.SpanType = agent.SpanType_Entry
-			case "outbound":
-				currentSpan.SpanType = agent.SpanType_Exit
-			default:
-				currentSpan.SpanType = agent.SpanType_Local
-			}
+// 			// 设置 SpanType（判断是 inbound 还是 outbound request）
+// 			// 这里简化处理，可以根据实际需求调整判断逻辑
+// 			switch source.Direction {
+// 			case "inbound":
+// 				currentSpan.SpanType = agent.SpanType_Entry
+// 			case "outbound":
+// 				currentSpan.SpanType = agent.SpanType_Exit
+// 			default:
+// 				currentSpan.SpanType = agent.SpanType_Local
+// 			}
 
-			// 设置 SpanLayer
-			currentSpan.SpanLayer = agent.SpanLayer_Unknown
+// 			// 设置 SpanLayer
+// 			currentSpan.SpanLayer = agent.SpanLayer_Unknown
 
-			// 设置组件ID
-			currentSpan.ComponentId = 0
+// 			// 设置组件ID
+// 			currentSpan.ComponentId = 0
 
-			// 设置对端地址
-			currentSpan.Peer = source.Connection.SrcHost + ":" + strconv.Itoa(source.Connection.SrcPort)
+// 			// 设置对端地址
+// 			currentSpan.Peer = source.Connection.SrcHost + ":" + strconv.Itoa(source.Connection.SrcPort)
 
-			// 设置标签
-			tags := make([]*common.KeyStringValuePair, 0)
+// 			// 设置标签
+// 			tags := make([]*common.KeyStringValuePair, 0)
 
-			// 将 Method 作为标签添加
-			tags = append(tags, &common.KeyStringValuePair{
-				Key:   "sip.method",
-				Value: req.Method(),
-			})
+// 			// 将 Method 作为标签添加
+// 			tags = append(tags, &common.KeyStringValuePair{
+// 				Key:   "sip.method",
+// 				Value: req.Method(),
+// 			})
 
-			// 将 Headers 转换为标签
-			for key, value := range sipMessage.Headers() {
-				tags = append(tags, &common.KeyStringValuePair{
-					Key:   "sip.header." + key,
-					Value: value,
-				})
-			}
+// 			// 将 Headers 转换为标签
+// 			for key, value := range sipMessage.Headers() {
+// 				tags = append(tags, &common.KeyStringValuePair{
+// 					Key:   "sip.header." + key,
+// 					Value: value,
+// 				})
+// 			}
 
-			currentSpan.Tags = tags
-			currentSpan.IsError = false
-		}
-	} else {
-		// 处理响应消息
-		if resp, ok := sipMessage.(SipResponse); ok {
-			// 设置 span 结束时间
-			currentSpan.EndTime = source.Timestamp
+// 			currentSpan.Tags = tags
+// 			currentSpan.IsError = false
+// 		}
+// 	} else {
+// 		// 处理响应消息
+// 		if resp, ok := sipMessage.(SipResponse); ok {
+// 			// 设置 span 结束时间
+// 			currentSpan.EndTime = source.Timestamp
 
-			// 设置错误状态
-			currentSpan.IsError = resp.Status() >= 400
+// 			// 设置错误状态
+// 			currentSpan.IsError = resp.Status() >= 400
 
-			// 添加响应相关的标签
-			if currentSpan.Tags == nil {
-				currentSpan.Tags = make([]*common.KeyStringValuePair, 0)
-			}
+// 			// 添加响应相关的标签
+// 			if currentSpan.Tags == nil {
+// 				currentSpan.Tags = make([]*common.KeyStringValuePair, 0)
+// 			}
 
-			currentSpan.Tags = append(currentSpan.Tags, &common.KeyStringValuePair{
-				Key:   "sip.status_code",
-				Value: strconv.Itoa(resp.Status()),
-			})
+// 			currentSpan.Tags = append(currentSpan.Tags, &common.KeyStringValuePair{
+// 				Key:   "sip.status_code",
+// 				Value: strconv.Itoa(resp.Status()),
+// 			})
 
-			currentSpan.Tags = append(currentSpan.Tags, &common.KeyStringValuePair{
-				Key:   "sip.status_line",
-				Value: resp.StatusLine(),
-			})
+// 			currentSpan.Tags = append(currentSpan.Tags, &common.KeyStringValuePair{
+// 				Key:   "sip.status_line",
+// 				Value: resp.StatusLine(),
+// 			})
 
-			// 处理响应后，将 CurrentSpan 减 1，指向之前一个请求的 span
-			if session.CurrentSpan > 0 {
-				session.CurrentSpan--
-			}
-		}
-	}
+// 			// 处理响应后，将 CurrentSpan 减 1，指向之前一个请求的 span
+// 			if session.CurrentSpan > 0 {
+// 				session.CurrentSpan--
+// 			}
+// 		}
+// 	}
 
-	return segment
-}
+// 	return segment
+// }
 
-func buildLogData(source *types.RawFrameData, message SipMessage, session *Session) *logging.LogData {
-	return &logging.LogData{
-		Service:         "SIP Service",
-		ServiceInstance: "SIP Instance",
-		Timestamp:       source.Timestamp,
-		Endpoint:        "SIP Endpoint",
-		Body: &logging.LogDataBody{
-			Type: "LogDataBodyType_TEXT",
-			Content: &logging.LogDataBody_Text{
-				Text: &logging.TextLog{
-					Text: string(source.Data),
-				},
-			},
-		},
-		Tags: &logging.LogTags{
-			Data: []*common.KeyStringValuePair{
-				{
-					Key:   "sip.protocol",
-					Value: "SIP",
-				},
-				{
-					Key:   "sip.direction",
-					Value: source.Direction,
-				},
-			},
-		},
-		TraceContext: &logging.TraceContext{
-			TraceId:        session.Segment.TraceId,
-			TraceSegmentId: session.Segment.TraceSegmentId,
-			SpanId:         session.CurrentSpan,
-		},
-	}
-}
+// func buildLogData(source *types.RawFrameData, message SipMessage, session *Session) *logging.LogData {
+// 	segment := session.Segment
+// 	return &logging.LogData{
+// 		Service:         segment.Service,
+// 		ServiceInstance: segment.ServiceInstance,
+// 		Timestamp:       source.Timestamp,
+// 		Endpoint:        getEndpoint(message),
+// 		Body: &logging.LogDataBody{
+// 			Type: "LogDataBodyType_TEXT",
+// 			Content: &logging.LogDataBody_Text{
+// 				Text: &logging.TextLog{
+// 					Text: string(source.Data),
+// 				},
+// 			},
+// 		},
+// 		Tags: &logging.LogTags{
+// 			Data: []*common.KeyStringValuePair{
+// 				{
+// 					Key:   "sip.protocol",
+// 					Value: "SIP",
+// 				},
+// 				{
+// 					Key:   "sip.direction",
+// 					Value: source.Direction,
+// 				},
+// 			},
+// 		},
+// 		TraceContext: &logging.TraceContext{
+// 			TraceId:        session.Segment.TraceId,
+// 			TraceSegmentId: session.Segment.TraceSegmentId,
+// 			SpanId:         session.CurrentSpan,
+// 		},
+// 	}
+// }
+
+// func getEndpoint(message SipMessage) string {
+// 	cseq := message.CSeq()
+// 	if cseq == "" {
+// 		return "/UNKNOWN"
+// 	}
+
+// 	// 从CSeq中提取method
+// 	// CSeq格式通常是 "序列号 方法名"，例如 "1 INVITE" 或 "2 BYE"
+// 	parts := strings.Fields(cseq)
+// 	if len(parts) < 2 {
+// 		return "/UNKNOWN"
+// 	}
+
+// 	method := strings.ToUpper(parts[1])
+
+// 	// 定义会话初始消息和会话外消息
+// 	sessionInitMethods := map[string]bool{
+// 		"INVITE":    true,
+// 		"REGISTER":  true,
+// 		"OPTIONS":   true,
+// 		"MESSAGE":   true,
+// 		"PUBLISH":   true,
+// 		"SUBSCRIBE": true,
+// 		"NOTIFY":    true,
+// 	}
+
+// 	// 定义会话内消息及其对应的初始方法
+// 	sessionInternalMethods := map[string]string{
+// 		"ACK":    "INVITE",
+// 		"BYE":    "INVITE",
+// 		"CANCEL": "INVITE",
+// 		"PRACK":  "INVITE",
+// 		"UPDATE": "INVITE",
+// 		"REFER":  "INVITE",
+// 		"INFO":   "INVITE",
+// 	}
+
+// 	// 判断消息类型并返回endpoint
+// 	if sessionInitMethods[method] {
+// 		// 会话初始消息和会话外消息，endpoint为/{会话方法名}
+// 		return "/" + method
+// 	} else if initialMethod, exists := sessionInternalMethods[method]; exists {
+// 		// 会话内消息，统一为对应会话的初始消息
+// 		return "/" + initialMethod
+// 	} else {
+// 		// 未知方法，直接返回方法名
+// 		return "/" + method
+// 	}
+// }
 
 func (r *Receiver) Channel() <-chan *v1.SniffData {
 	return r.OutputChannel
