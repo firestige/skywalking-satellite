@@ -120,8 +120,7 @@ func (s *Sender) store(ctx context.Context, partition int, wg *sync.WaitGroup) {
 		// blocking output when disconnecting.
 		if atomic.LoadInt32(&s.blocking) == 1 {
 			time.Sleep(100 * time.Millisecond)
-			log.Logger.WithField("pipe", s.config.PipeName).
-				Debugf("the client connection is disconnect, blocking the buffer")
+
 			continue
 		}
 		select {

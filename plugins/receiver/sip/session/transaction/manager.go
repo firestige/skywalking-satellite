@@ -1,20 +1,30 @@
 package transaction
 
 import (
+	"time"
+
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 )
 
+type TransactionPair struct {
+	request       types.SipRequest
+	response      types.SipResponse
+	lastUopdateAt time.Time
+}
+
 type TransactionManager struct {
 	store     map[string]*TransactionContext // 使用事务ID作为标识
 	listeners []types.TransactionListener
+	buffer    map[string]*TransactionPair
 }
 
 func NewTransactionManager() *TransactionManager {
 	return &TransactionManager{
 		store:     make(map[string]*TransactionContext),
 		listeners: make([]types.TransactionListener, 0),
+		buffer:    make(map[string]*TransactionPair),
 	}
 }
 
@@ -53,6 +63,40 @@ func (m *TransactionManager) CreateTransaction(msg types.SipMessage) *Transactio
 }
 
 func (m *TransactionManager) HandleMessage(msg types.SipMessage) error {
+	// 为了保持消息有序，我们对请求和响应进行缓存
+	txID := utils.BuildTransactionID(msg)
+	pair, exists := m.buffer[txID]
+	if !exists {
+		pair = &TransactionPair{}
+		m.buffer[txID] = pair
+	}
+	if msg.IsRequest() {
+		pair.request = msg.(types.SipRequest)
+	} else {
+		pair.response = msg.(types.SipResponse)
+	}
+	pair.lastUopdateAt = time.Now()
+	// 处理缓存中的请求和响应
+	if pair.request != nil && pair.response != nil {
+		// 如果请求和响应都存在，说明相关请求已收到，可以处理
+		// 先处理请求，再处理响应
+		err := m.HandleMessage0(pair.request)
+		if err != nil {
+			return err
+		}
+		err = m.HandleMessage0(pair.response)
+		if err != nil {
+			return err
+		}
+		// 处理完成后，删除缓存
+		delete(m.buffer, txID)
+	}
+	// 如果不存在就等下次收到消息进行处理
+	// 验证一下，我怀疑由于 partition 的存在，可能会导致请求和响应不在同一个 goroutine 中被处理，缓存需要设计成单例的
+	return nil
+}
+
+func (m *TransactionManager) HandleMessage0(msg types.SipMessage) error {
 	tx, exist := m.GetTransactionBySipMessage(msg)
 	if !exist && msg.IsRequest() {
 		if req, ok := msg.(types.SipRequest); ok {
@@ -94,4 +138,27 @@ func (m *TransactionManager) GetAllTransactions() []*TransactionContext {
 		allTransactions = append(allTransactions, ctx)
 	}
 	return allTransactions
+}
+
+func (m *TransactionManager) Clear() {
+	ticker := time.NewTicker(5 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for range ticker.C {
+			m.clearExpiredPairs()
+		}
+	}()
+}
+
+func (m *TransactionManager) clearExpiredPairs() {
+	now := time.Now()
+	expiredThreshold := 30 * time.Second
+
+	for txID, pair := range m.buffer {
+		if now.Sub(pair.lastUopdateAt) > expiredThreshold {
+			delete(m.buffer, txID)
+			log.Logger.WithField("Transaction-ID", txID).
+				Infof("Cleared expired transaction pair, last updated: %s", pair.lastUopdateAt.Format(time.RFC3339))
+		}
+	}
 }

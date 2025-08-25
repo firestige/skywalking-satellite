@@ -121,6 +121,7 @@ func (ctx *TraceContext) FinishExistSpan(id string, isError bool, endTime int64)
 			span := ctx.segment.Spans[i]
 			span.EndTime = endTime
 			span.IsError = isError
+			log.Logger.Infof("Finished span with ID %s in trace context %s, from: %d to %d", id, ctx.traceID, span.StartTime, span.EndTime)
 			return
 		}
 	}
