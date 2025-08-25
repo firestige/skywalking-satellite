@@ -8,23 +8,22 @@ import (
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 )
 
-type TransactionPair struct {
-	request       types.SipRequest
-	response      types.SipResponse
-	lastUopdateAt time.Time
+type PendingResponseContainer struct {
+	responses    []types.SipResponse
+	lastUpdateAt time.Time
 }
 
 type TransactionManager struct {
 	store     map[string]*TransactionContext // 使用事务ID作为标识
 	listeners []types.TransactionListener
-	buffer    map[string]*TransactionPair
+	buffer    map[string]*PendingResponseContainer
 }
 
 func NewTransactionManager() *TransactionManager {
 	return &TransactionManager{
 		store:     make(map[string]*TransactionContext),
 		listeners: make([]types.TransactionListener, 0),
-		buffer:    make(map[string]*TransactionPair),
+		buffer:    make(map[string]*PendingResponseContainer),
 	}
 }
 
@@ -63,47 +62,30 @@ func (m *TransactionManager) CreateTransaction(msg types.SipMessage) *Transactio
 }
 
 func (m *TransactionManager) HandleMessage(msg types.SipMessage) error {
-	// 为了保持消息有序，我们对请求和响应进行缓存
-	txID := utils.BuildTransactionID(msg)
-	pair, exists := m.buffer[txID]
-	if !exists {
-		pair = &TransactionPair{}
-		m.buffer[txID] = pair
-	}
-	if msg.IsRequest() {
-		pair.request = msg.(types.SipRequest)
-	} else {
-		pair.response = msg.(types.SipResponse)
-	}
-	pair.lastUopdateAt = time.Now()
-	// 处理缓存中的请求和响应
-	if pair.request != nil && pair.response != nil {
-		// 如果请求和响应都存在，说明相关请求已收到，可以处理
-		// 先处理请求，再处理响应
-		err := m.HandleMessage0(pair.request)
-		if err != nil {
-			return err
-		}
-		err = m.HandleMessage0(pair.response)
-		if err != nil {
-			return err
-		}
-		// 处理完成后，删除缓存
-		delete(m.buffer, txID)
-	}
-	// 如果不存在就等下次收到消息进行处理
-	// 验证一下，我怀疑由于 partition 的存在，可能会导致请求和响应不在同一个 goroutine 中被处理，缓存需要设计成单例的
-	return nil
-}
-
-func (m *TransactionManager) HandleMessage0(msg types.SipMessage) error {
 	tx, exist := m.GetTransactionBySipMessage(msg)
-	if !exist && msg.IsRequest() {
-		if req, ok := msg.(types.SipRequest); ok {
-			tx = m.CreateTransaction(req)
-			if tx != nil {
-				log.Logger.Infof("Created new transaction: %s", tx.ID())
+	if !exist {
+		if msg.IsRequest() {
+			if req, ok := msg.(types.SipRequest); ok {
+				tx = m.CreateTransaction(req)
+				if tx != nil {
+					log.Logger.Infof("Created new transaction: %s", tx.ID())
+				}
 			}
+		} else {
+			// 有可能请求还没到，先缓存响应
+			txID := utils.BuildTransactionID(msg)
+			resp := msg.(types.SipResponse)
+			container, exists := m.buffer[txID]
+			if !exists {
+				container = &PendingResponseContainer{
+					responses:    make([]types.SipResponse, 0),
+					lastUpdateAt: time.Now(),
+				}
+				m.buffer[txID] = container
+			}
+			container.responses = append(container.responses, resp)
+			container.lastUpdateAt = time.Now()
+			return nil // 直接返回，等待下次请求到达
 		}
 	}
 	if tx == nil {
@@ -117,6 +99,15 @@ func (m *TransactionManager) HandleMessage0(msg types.SipMessage) error {
 				listener.OnTransactionTerminated(tx)
 			}
 		}
+	}
+	// 处理完请求查看是否有没处理的响应
+	txID := tx.ID()
+	container, exists := m.buffer[txID]
+	if exists {
+		for _, resp := range container.responses {
+			tx.HandleMessage(resp)
+		}
+		delete(m.buffer, txID)
 	}
 	return err
 }
@@ -155,10 +146,10 @@ func (m *TransactionManager) clearExpiredPairs() {
 	expiredThreshold := 30 * time.Second
 
 	for txID, pair := range m.buffer {
-		if now.Sub(pair.lastUopdateAt) > expiredThreshold {
+		if now.Sub(pair.lastUpdateAt) > expiredThreshold {
 			delete(m.buffer, txID)
 			log.Logger.WithField("Transaction-ID", txID).
-				Infof("Cleared expired transaction pair, last updated: %s", pair.lastUopdateAt.Format(time.RFC3339))
+				Infof("Cleared expired transaction pair, last updated: %s", pair.lastUpdateAt.Format(time.RFC3339))
 		}
 	}
 }
