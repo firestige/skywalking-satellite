@@ -1,6 +1,7 @@
 package transaction
 
 import (
+	"sync"
 	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
@@ -14,16 +15,16 @@ type PendingResponseContainer struct {
 }
 
 type TransactionManager struct {
-	store     map[string]*TransactionContext // 使用事务ID作为标识
+	store     *sync.Map // 使用事务ID作为标识
 	listeners []types.TransactionListener
-	buffer    map[string]*PendingResponseContainer
+	buffer    *sync.Map
 }
 
 func NewTransactionManager() *TransactionManager {
 	return &TransactionManager{
-		store:     make(map[string]*TransactionContext),
+		store:     &sync.Map{},
 		listeners: make([]types.TransactionListener, 0),
-		buffer:    make(map[string]*PendingResponseContainer),
+		buffer:    &sync.Map{},
 	}
 }
 
@@ -52,7 +53,7 @@ func (m *TransactionManager) CreateTransaction(msg types.SipMessage) *Transactio
 			return nil
 		}
 		tx := NewTransaction(req, state)
-		m.store[tx.ID()] = tx
+		m.store.Store(tx.ID(), tx)
 		for _, listener := range m.listeners {
 			listener.OnTransactionCreated(tx)
 		}
@@ -75,16 +76,16 @@ func (m *TransactionManager) HandleMessage(msg types.SipMessage) error {
 			// 有可能请求还没到，先缓存响应
 			txID := utils.BuildTransactionID(msg)
 			resp := msg.(types.SipResponse)
-			container, exists := m.buffer[txID]
+			container, exists := m.buffer.Load(txID)
 			if !exists {
 				container = &PendingResponseContainer{
 					responses:    make([]types.SipResponse, 0),
 					lastUpdateAt: time.Now(),
 				}
-				m.buffer[txID] = container
+				m.buffer.Store(txID, container)
 			}
-			container.responses = append(container.responses, resp)
-			container.lastUpdateAt = time.Now()
+			container.(*PendingResponseContainer).responses = append(container.(*PendingResponseContainer).responses, resp)
+			container.(*PendingResponseContainer).lastUpdateAt = time.Now()
 			return nil // 直接返回，等待下次请求到达
 		}
 	}
@@ -102,32 +103,33 @@ func (m *TransactionManager) HandleMessage(msg types.SipMessage) error {
 	}
 	// 处理完请求查看是否有没处理的响应
 	txID := tx.ID()
-	container, exists := m.buffer[txID]
+	container, exists := m.buffer.Load(txID)
 	if exists {
-		for _, resp := range container.responses {
+		for _, resp := range container.(*PendingResponseContainer).responses {
 			tx.HandleMessage(resp)
 		}
-		delete(m.buffer, txID)
+		m.buffer.Delete(txID)
 	}
 	return err
 }
 
 func (m *TransactionManager) GetTransactionByID(id string) (*TransactionContext, bool) {
-	ctx, exists := m.store[id]
-	return ctx, exists
+	ctx, exists := m.store.Load(id)
+	return ctx.(*TransactionContext), exists
 }
 
 func (m *TransactionManager) GetTransactionBySipMessage(msg types.SipMessage) (*TransactionContext, bool) {
 	txID := utils.BuildTransactionID(msg)
-	ctx, exists := m.store[txID]
-	return ctx, exists
+	ctx, exists := m.store.Load(txID)
+	return ctx.(*TransactionContext), exists
 }
 
 func (m *TransactionManager) GetAllTransactions() []*TransactionContext {
 	var allTransactions []*TransactionContext
-	for _, ctx := range m.store {
-		allTransactions = append(allTransactions, ctx)
-	}
+	m.store.Range(func(key, value interface{}) bool {
+		allTransactions = append(allTransactions, value.(*TransactionContext))
+		return true
+	})
 	return allTransactions
 }
 
@@ -145,11 +147,12 @@ func (m *TransactionManager) clearExpiredPairs() {
 	now := time.Now()
 	expiredThreshold := 30 * time.Second
 
-	for txID, pair := range m.buffer {
-		if now.Sub(pair.lastUpdateAt) > expiredThreshold {
-			delete(m.buffer, txID)
-			log.Logger.WithField("Transaction-ID", txID).
-				Infof("Cleared expired transaction pair, last updated: %s", pair.lastUpdateAt.Format(time.RFC3339))
+	m.buffer.Range(func(key, value interface{}) bool {
+		if now.Sub(value.(*PendingResponseContainer).lastUpdateAt) > expiredThreshold {
+			m.buffer.Delete(key)
+			log.Logger.WithField("Transaction-ID", key).
+				Infof("Cleared expired transaction pair, last updated: %s", value.(*PendingResponseContainer).lastUpdateAt.Format(time.RFC3339))
 		}
-	}
+		return true
+	})
 }

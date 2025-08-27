@@ -1,19 +1,21 @@
 package dialog
 
 import (
+	"sync"
+
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 )
 
 type DialogManager struct {
-	store     map[string]*DialogContext // 使用 dialog-ID 作为对话标识
+	store     *sync.Map // 使用 dialog-ID 作为对话标识
 	listeners []types.DialogListener
 }
 
 func NewDialogManager() *DialogManager {
 	return &DialogManager{
-		store:     make(map[string]*DialogContext),
+		store:     &sync.Map{},
 		listeners: make([]types.DialogListener, 0),
 	}
 }
@@ -28,7 +30,7 @@ func (dm *DialogManager) CreateDialog(req types.SipRequest) *DialogContext {
 		log.Logger.WithError(err).Errorf("Failed to create dialog for request: %s", req.StartLine())
 		return nil // 如果创建对话失败，返回 nil
 	}
-	dm.store[ctx.ID()] = ctx
+	dm.store.Store(ctx.ID(), ctx)
 	for _, listener := range dm.listeners {
 		listener.OnDialogCreated(ctx)
 	}
@@ -36,33 +38,34 @@ func (dm *DialogManager) CreateDialog(req types.SipRequest) *DialogContext {
 }
 
 func (dm *DialogManager) GetDialogByID(id string) (*DialogContext, bool) {
-	ctx, exists := dm.store[id]
+	ctx, exists := dm.store.Load(id)
 	if !exists {
 		return nil, false // 如果对话不存在，返回 nil 和 false
 	}
-	return ctx, true
+	return ctx.(*DialogContext), true
 }
 
 func (dm *DialogManager) GetAllDialogs() []*DialogContext {
 	var allDialogs []*DialogContext
-	for _, ctx := range dm.store {
-		allDialogs = append(allDialogs, ctx)
-	}
+	dm.store.Range(func(key, value interface{}) bool {
+		allDialogs = append(allDialogs, value.(*DialogContext))
+		return true
+	})
 	return allDialogs
 }
 
 func (dm *DialogManager) GetDialogBySipMessage(msg types.SipMessage) (*DialogContext, bool) {
 	// TODO 先不考虑fork场景，简化模型，统一到早期对话
 	dialogID := utils.BuildDialogID(msg, true)
-	ctx, exists := dm.store[dialogID]
+	ctx, exists := dm.store.Load(dialogID)
 	if !exists {
 		dialogID := utils.BuildDialogID(msg, true)
-		ctx, exists = dm.store[dialogID]
+		ctx, exists = dm.store.Load(dialogID)
 		if !exists {
 			return nil, false // 如果对话不存在，返回 nil 和 false
 		}
 	}
-	return ctx, true // 返回找到的对话上下文和 true
+	return ctx.(*DialogContext), true // 返回找到的对话上下文和 true
 }
 
 func (dm *DialogManager) HandleMessage(msg types.SipMessage) error {

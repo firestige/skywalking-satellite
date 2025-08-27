@@ -3,6 +3,7 @@ package trace
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/sniffdata"
@@ -23,51 +24,60 @@ type TraceContext struct {
 type TraceManager struct {
 	serviceName       string
 	serviceInstanceId string
-	traceContext      map[string]*TraceContext // key: trace ID
-	mappings          map[string]string        // key: call-id, value: trace ID
+	traceContext      *sync.Map // key: trace ID
+	mappings          *sync.Map // key: call-id, value: trace ID
 }
 
 func NewTraceManager(serviceName, serviceInstanceId string) *TraceManager {
 	return &TraceManager{
 		serviceName:       serviceName,
 		serviceInstanceId: serviceInstanceId,
-		traceContext:      make(map[string]*TraceContext),
-		mappings:          make(map[string]string),
+		traceContext:      &sync.Map{},
+		mappings:          &sync.Map{},
 	}
 }
 
 func (m *TraceManager) GetTraceContextByTraceID(traceID string) (*TraceContext, bool) {
-	ctx, exists := m.traceContext[traceID]
-	return ctx, exists
+	ctx, exists := m.traceContext.Load(traceID)
+	if !exists {
+		return nil, false
+	}
+	return ctx.(*TraceContext), true
 }
 
 func (m *TraceManager) GetTraceContextByCallID(callID string) (*TraceContext, bool) {
-	if traceID, exists := m.mappings[callID]; exists {
-		return m.GetTraceContextByTraceID(traceID)
+	if traceID, exists := m.mappings.Load(callID); exists {
+		return m.GetTraceContextByTraceID(traceID.(string))
 	}
 	return nil, false
 }
 
 func (m *TraceManager) CreateTraceContext(traceID string, createAt int64) *TraceContext {
-	if _, exists := m.traceContext[traceID]; !exists {
+	if _, exists := m.traceContext.Load(traceID); !exists {
 		// 创建新的TraceContext
 		segment := sniffdata.NewSegmentBuilder(m.serviceName, m.serviceInstanceId).
 			WithTraceId(traceID).
 			WithTimestamp(createAt).
 			Build()
-		m.traceContext[traceID] = &TraceContext{
+		ctx := &TraceContext{
 			traceID:      traceID,
 			segment:      segment,
 			idMapping:    make([]string, 0), // 初始化idMapping
 			isInitalized: false,             // 初始状态为未初始化
 		}
+		m.traceContext.Store(traceID, ctx)
 	}
-	return m.traceContext[traceID]
+
+	ctx, ok := m.traceContext.Load(traceID)
+	if !ok {
+		return nil
+	}
+	return ctx.(*TraceContext)
 }
 
 func (m *TraceManager) AliasWithCallID(traceID string, callID string) error {
 	if _, exists := m.GetTraceContextByTraceID(traceID); exists {
-		m.mappings[callID] = traceID
+		m.mappings.Store(callID, traceID)
 		return nil
 	}
 	return fmt.Errorf("trace context not found for trace ID %s", traceID)
