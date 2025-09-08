@@ -115,13 +115,21 @@ func (m *TransactionManager) HandleMessage(msg types.SipMessage) error {
 
 func (m *TransactionManager) GetTransactionByID(id string) (*TransactionContext, bool) {
 	ctx, exists := m.store.Load(id)
-	return ctx.(*TransactionContext), exists
+	if ctx == nil {
+		return nil, exists
+	} else {
+		return ctx.(*TransactionContext), exists
+	}
 }
 
 func (m *TransactionManager) GetTransactionBySipMessage(msg types.SipMessage) (*TransactionContext, bool) {
 	txID := utils.BuildTransactionID(msg)
 	ctx, exists := m.store.Load(txID)
-	return ctx.(*TransactionContext), exists
+	if ctx == nil {
+		return nil, exists
+	} else {
+		return ctx.(*TransactionContext), exists
+	}
 }
 
 func (m *TransactionManager) GetAllTransactions() []*TransactionContext {
