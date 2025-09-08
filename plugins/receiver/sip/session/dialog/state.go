@@ -99,23 +99,31 @@ func (s *ConfirmedState) Exit(ctx *DialogContext) {
 	// 清理已确认状态
 }
 
-type TerminatedState struct{}
+type TerminatedState struct {
+	count int
+}
 
 func (s *TerminatedState) Name() string {
 	return "TerminatedState"
 }
 
 func (s *TerminatedState) IsTerminated() bool {
-	return true
+	return s.count > 1
 }
 
 func (s *TerminatedState) Enter(ctx *DialogContext) {
 	// 初始化终止状态
+	s.count++
 }
 
 func (s *TerminatedState) HandleMessage(ctx *DialogContext, msg types.SipMessage) (DialogState, error) {
-	// 终止态不再处理任何事件
-	return nil, fmt.Errorf("dialog already terminated")
+	// 二次进入之后才算真正的终止，因为第一次是请求，第二次是响应
+	if s.count < 2 {
+		return s, nil
+	} else {
+		// 终止态不再处理任何事件
+		return nil, fmt.Errorf("dialog already terminated")
+	}
 }
 
 func (s *TerminatedState) Exit(ctx *DialogContext) {

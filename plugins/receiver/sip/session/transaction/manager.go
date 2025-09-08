@@ -2,29 +2,21 @@ package transaction
 
 import (
 	"sync"
-	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 )
 
-type PendingResponseContainer struct {
-	responses    []types.SipResponse
-	lastUpdateAt time.Time
-}
-
 type TransactionManager struct {
 	store     *sync.Map // 使用事务ID作为标识
 	listeners []types.TransactionListener
-	buffer    *sync.Map
 }
 
 func NewTransactionManager() *TransactionManager {
 	return &TransactionManager{
 		store:     &sync.Map{},
 		listeners: make([]types.TransactionListener, 0),
-		buffer:    &sync.Map{},
 	}
 }
 
@@ -72,21 +64,6 @@ func (m *TransactionManager) HandleMessage(msg types.SipMessage) error {
 					log.Logger.Infof("Created new transaction: %s", tx.ID())
 				}
 			}
-		} else {
-			// 有可能请求还没到，先缓存响应
-			txID := utils.BuildTransactionID(msg)
-			resp := msg.(types.SipResponse)
-			container, exists := m.buffer.Load(txID)
-			if !exists {
-				container = &PendingResponseContainer{
-					responses:    make([]types.SipResponse, 0),
-					lastUpdateAt: time.Now(),
-				}
-				m.buffer.Store(txID, container)
-			}
-			container.(*PendingResponseContainer).responses = append(container.(*PendingResponseContainer).responses, resp)
-			container.(*PendingResponseContainer).lastUpdateAt = time.Now()
-			return nil // 直接返回，等待下次请求到达
 		}
 	}
 	if tx == nil {
@@ -100,15 +77,6 @@ func (m *TransactionManager) HandleMessage(msg types.SipMessage) error {
 				listener.OnTransactionTerminated(tx)
 			}
 		}
-	}
-	// 处理完请求查看是否有没处理的响应
-	txID := tx.ID()
-	container, exists := m.buffer.Load(txID)
-	if exists {
-		for _, resp := range container.(*PendingResponseContainer).responses {
-			tx.HandleMessage(resp)
-		}
-		m.buffer.Delete(txID)
 	}
 	return err
 }
@@ -139,28 +107,4 @@ func (m *TransactionManager) GetAllTransactions() []*TransactionContext {
 		return true
 	})
 	return allTransactions
-}
-
-func (m *TransactionManager) Clear() {
-	ticker := time.NewTicker(5 * time.Second)
-	go func() {
-		defer ticker.Stop()
-		for range ticker.C {
-			m.clearExpiredPairs()
-		}
-	}()
-}
-
-func (m *TransactionManager) clearExpiredPairs() {
-	now := time.Now()
-	expiredThreshold := 30 * time.Second
-
-	m.buffer.Range(func(key, value interface{}) bool {
-		if now.Sub(value.(*PendingResponseContainer).lastUpdateAt) > expiredThreshold {
-			m.buffer.Delete(key)
-			log.Logger.WithField("Transaction-ID", key).
-				Infof("Cleared expired transaction pair, last updated: %s", value.(*PendingResponseContainer).lastUpdateAt.Format(time.RFC3339))
-		}
-		return true
-	})
 }

@@ -57,15 +57,17 @@ func (nc *networkCapture) Start() error {
 
 	// first start worker goroutines
 	// tcp
-	for i := 0; i < nc.config.TCPWorkers; i++ {
-		nc.wg.Add(1)
-		go nc.tcpProcessLoop()
-	}
+	// for i := 0; i < nc.config.TCPWorkers; i++ {
+	// 	nc.wg.Add(1)
+	// 	go nc.tcpProcessLoop()
+	// }
 
-	for i := 0; i < nc.config.UDPWorkers; i++ {
-		nc.wg.Add(1)
-		go nc.udpProcessLoop()
-	}
+	// for i := 0; i < nc.config.UDPWorkers; i++ {
+	// 	nc.wg.Add(1)
+	// 	go nc.udpProcessLoop()
+	// }
+
+	go nc.udpProcessLoop()
 
 	// second start main capture loop
 	nc.wg.Add(1)
