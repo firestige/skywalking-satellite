@@ -6,6 +6,10 @@ type SipObject interface {
 	String() string
 	Direction() Direction
 	CreatedAt() int64
+	SrcURI() string
+	DstURI() string
+	LocalURI() string // 本地地址"ip:port"
+	RemoteURI() string
 }
 
 type SipContent interface {

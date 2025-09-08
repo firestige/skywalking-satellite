@@ -1,6 +1,7 @@
 package sip
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
@@ -119,6 +120,38 @@ func (m *sipMessage) String() string {
 
 func (m *sipMessage) StartLine() string {
 	return m.delegate.StartLine()
+}
+
+func (m *sipMessage) SrcURI() string {
+	if m.connection != nil && m.connection.SrcIp != "" && m.connection.SrcPort != 0 {
+		return fmt.Sprintf("%s:%d", m.connection.SrcIp, m.connection.SrcPort)
+	}
+	return ""
+}
+
+func (m *sipMessage) DstURI() string {
+	if m.connection != nil && m.connection.DstIp != "" && m.connection.DstPort != 0 {
+		return fmt.Sprintf("%s:%d", m.connection.DstIp, m.connection.DstPort)
+	}
+	return ""
+}
+
+func (m *sipMessage) LocalURI() string {
+	if m.Direction() == types.DirectionInbound {
+		return m.DstURI()
+	} else if m.Direction() == types.DirectionOutbound {
+		return m.SrcURI()
+	}
+	return ""
+}
+
+func (m *sipMessage) RemoteURI() string {
+	if m.Direction() == types.DirectionInbound {
+		return m.SrcURI()
+	} else if m.Direction() == types.DirectionOutbound {
+		return m.DstURI()
+	}
+	return ""
 }
 
 // SipRequest interface implementations

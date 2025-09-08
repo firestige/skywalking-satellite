@@ -33,6 +33,13 @@ func (dm *DialogManager) CreateDialog(req types.SipRequest) *DialogContext {
 	dm.store.Store(ctx.ID(), ctx)
 	for _, listener := range dm.listeners {
 		listener.OnDialogCreated(ctx)
+		ctx.onStateChange = func(oldState, newState DialogState) {
+			if oldState != newState {
+				for _, listener := range dm.listeners {
+					listener.OnDialogStateChanged(ctx)
+				}
+			}
+		}
 	}
 	return ctx
 }
@@ -56,10 +63,10 @@ func (dm *DialogManager) GetAllDialogs() []*DialogContext {
 
 func (dm *DialogManager) GetDialogBySipMessage(msg types.SipMessage) (*DialogContext, bool) {
 	// TODO 先不考虑fork场景，简化模型，统一到早期对话
-	dialogID := utils.BuildDialogID(msg, true)
+	dialogID := utils.BuildDialogID(msg)
 	ctx, exists := dm.store.Load(dialogID)
 	if !exists {
-		dialogID := utils.BuildDialogID(msg, true)
+		dialogID := utils.BuildDialogID(msg)
 		ctx, exists = dm.store.Load(dialogID)
 		if !exists {
 			return nil, false // 如果对话不存在，返回 nil 和 false

@@ -74,6 +74,7 @@ func (m *TransactionManager) HandleMessage(msg types.SipMessage) error {
 	if err == nil {
 		if tx.state.IsTerminated() {
 			for _, listener := range m.listeners {
+				log.Logger.WithField("Transaction-ID", tx.ID()).Infof("Transaction terminated at %d", tx.UpdatedAt())
 				listener.OnTransactionTerminated(tx)
 			}
 		}

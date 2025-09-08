@@ -9,15 +9,16 @@ import (
 )
 
 type DialogContext struct {
-	id        string
-	state     DialogState
-	ua        types.UAType
-	callID    string
-	local     string
-	remote    string
-	createAt  int64
-	updatedAt int64
-	metaData  map[string]string
+	id            string
+	state         DialogState
+	ua            types.UAType
+	callID        string
+	local         string
+	remote        string
+	createAt      int64
+	updatedAt     int64
+	metaData      map[string]string
+	onStateChange func(oldState, newState DialogState)
 }
 
 func NewDialogContext(req types.SipRequest) (*DialogContext, error) {
@@ -26,7 +27,7 @@ func NewDialogContext(req types.SipRequest) (*DialogContext, error) {
 		return nil, fmt.Errorf("invalid method %s for dialog creation", req.Method())
 	}
 	// TODO 注意早期对话没有TO头
-	id := utils.BuildDialogID(req, true)
+	id := utils.BuildDialogID(req)
 	ua := utils.ParseUAType(req)
 	callID := req.CallID()
 	state := &EarlyState{}

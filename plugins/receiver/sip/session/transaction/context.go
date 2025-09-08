@@ -12,6 +12,7 @@ type TransactionContext struct {
 	txType       types.TransactionType
 	ua           types.UAType
 	req          types.SipRequest
+	responses    []types.SipResponse
 	lastResponse types.SipResponse
 	createAt     int64                   // 创建时间
 	updatedAt    int64                   // 更新时间
@@ -30,6 +31,7 @@ func NewTransaction(req types.SipRequest, state TransactionState) *TransactionCo
 		txType:    txType,
 		ua:        ua,
 		req:       req,
+		responses: make([]types.SipResponse, 0),
 		createAt:  req.CreatedAt(),
 		updatedAt: req.CreatedAt(),
 		timerMap:  make(map[TimerName]TimerSpan),
@@ -41,6 +43,10 @@ func (ctx *TransactionContext) HandleMessage(msg types.SipMessage) error {
 	newState, err := ctx.state.HandleMessage(ctx, msg)
 	if err != nil {
 		return err
+	}
+	if !msg.IsRequest() {
+		ctx.updatedAt = msg.CreatedAt()
+		ctx.responses = append(ctx.responses, ctx.lastResponse)
 	}
 
 	ctx.transitionTo(newState)
@@ -85,6 +91,10 @@ func (ctx *TransactionContext) UA() types.UAType {
 
 func (ctx *TransactionContext) Request() types.SipRequest {
 	return ctx.req
+}
+
+func (ctx *TransactionContext) Responses() []types.SipResponse {
+	return ctx.responses
 }
 
 func (ctx *TransactionContext) LastResponse() types.SipResponse {

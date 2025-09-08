@@ -31,6 +31,8 @@ func (s *NonInviteTryingState) HandleMessage(ctx *TransactionContext, msg types.
 	if req, ok := msg.(types.SipRequest); ok {
 		if req.Method() == types.MethodInvite {
 			return s, nil // 保持Trying状态
+		} else if req.Method() == types.MethodAck {
+			return &NonInviteTerminatedState{}, nil // 收到ACK，直接进入Terminated
 		}
 	}
 	if resp, ok := msg.(types.SipResponse); ok {
@@ -120,7 +122,7 @@ func (s *NonInviteCompletedState) Exit(ctx *TransactionContext) {
 }
 
 func (s *NonInviteCompletedState) IsTerminated() bool {
-	return false
+	return true
 }
 
 type NonInviteTerminatedState struct{}
@@ -282,7 +284,7 @@ func (s *InviteConfirmedState) Exit(ctx *TransactionContext) {
 }
 
 func (s *InviteConfirmedState) IsTerminated() bool {
-	return false
+	return true
 }
 
 type InviteTerminatedState struct{}

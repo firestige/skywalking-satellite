@@ -5,6 +5,7 @@ type Transaction interface {
 	Type() TransactionType
 	UA() UAType
 	Request() SipRequest
+	Responses() []SipResponse
 	LastResponse() SipResponse
 	CreatedAt() int64
 	UpdatedAt() int64

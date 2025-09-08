@@ -1,31 +1,67 @@
 package trace
 
 import (
+	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/sniffdata"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
-	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
+	common "skywalking.apache.org/repo/goapi/collect/common/v3"
 	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
 	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
 )
 
+var PREFIX = "SNIFFER-"
+
 type TraceContext struct {
 	traceID   string
-	idMapping []string // 序号是span ID，内容是Dialog ID或者Transaction ID，特殊的，idMapping[0]是Call-ID
+	idMapping []string // 使用dialog ID和transaction ID追踪spanID，value是dialog ID或transaction ID，index是spanID
 	segment   *agent.SegmentObject
 
 	isInitalized bool // 是否已经初始化
+}
+
+func (ctx *TraceContext) addMsgToSpan(id string, msgs []types.SipMessage) {
+	if len(msgs) == 0 {
+		return
+	}
+	spanId := slices.Index(ctx.idMapping, id)
+	if spanId == -1 {
+		log.Logger.Errorf("span with ID %s not found in trace context %s, cannot add messages", id, ctx.traceID)
+		return
+	}
+	span := ctx.segment.Spans[spanId]
+	span.Tags = append(span.Tags, buildSequenceTag(msgs))
+}
+
+func buildSequenceTag(msgs []types.SipMessage) *common.KeyStringValuePair {
+	items := make([]*sniffdata.SipSequenceData, 0, len(msgs))
+	for _, msg := range msgs {
+		items = append(items, sniffdata.NewSipSequenceData(msg))
+	}
+	jsonStr, err := json.Marshal(items)
+	if err != nil {
+		log.Logger.Errorf("failed to marshal SipSequenceData: %v", err)
+		jsonStr = []byte("[]")
+	}
+	return &common.KeyStringValuePair{
+		Key:   "sip_seq_data",
+		Value: string(jsonStr),
+	}
 }
 
 type TraceManager struct {
 	serviceName       string
 	serviceInstanceId string
 	traceContext      *sync.Map // key: trace ID
-	mappings          *sync.Map // key: call-id, value: trace ID
+}
+
+func (m *TraceManager) RemoveTraceContextByCallID(id string) {
+	m.traceContext.Delete(wrapWithPrefix(id))
 }
 
 func NewTraceManager(serviceName, serviceInstanceId string) *TraceManager {
@@ -33,11 +69,11 @@ func NewTraceManager(serviceName, serviceInstanceId string) *TraceManager {
 		serviceName:       serviceName,
 		serviceInstanceId: serviceInstanceId,
 		traceContext:      &sync.Map{},
-		mappings:          &sync.Map{},
 	}
 }
 
 func (m *TraceManager) GetTraceContextByTraceID(traceID string) (*TraceContext, bool) {
+	traceID = wrapWithPrefix(traceID)
 	ctx, exists := m.traceContext.Load(traceID)
 	if !exists {
 		return nil, false
@@ -45,21 +81,13 @@ func (m *TraceManager) GetTraceContextByTraceID(traceID string) (*TraceContext, 
 	return ctx.(*TraceContext), true
 }
 
-func (m *TraceManager) GetTraceContextByCallID(callID string) (*TraceContext, bool) {
-	if traceID, exists := m.mappings.Load(callID); exists {
-		return m.GetTraceContextByTraceID(traceID.(string))
-	}
-	return nil, false
-}
-
 func (m *TraceManager) CreateTraceContext(traceID string, createAt int64) *TraceContext {
-	if _, exists := m.traceContext.Load(traceID); !exists {
+	traceID = wrapWithPrefix(traceID)
+	ctx, exists := m.traceContext.Load(traceID)
+	if !exists {
 		// 创建新的TraceContext
-		segment := sniffdata.NewSegmentBuilder(m.serviceName, m.serviceInstanceId).
-			WithTraceId(traceID).
-			WithTimestamp(createAt).
-			Build()
-		ctx := &TraceContext{
+		segment := sniffdata.NewSegmentBuilder(m.serviceName, m.serviceInstanceId).WithTraceId(traceID).WithTimestamp(createAt).Build()
+		ctx = &TraceContext{
 			traceID:      traceID,
 			segment:      segment,
 			idMapping:    make([]string, 0), // 初始化idMapping
@@ -67,38 +95,12 @@ func (m *TraceManager) CreateTraceContext(traceID string, createAt int64) *Trace
 		}
 		m.traceContext.Store(traceID, ctx)
 	}
-
-	ctx, ok := m.traceContext.Load(traceID)
-	if !ok {
-		return nil
-	}
 	return ctx.(*TraceContext)
-}
-
-func (m *TraceManager) AliasWithCallID(traceID string, callID string) error {
-	if _, exists := m.GetTraceContextByTraceID(traceID); exists {
-		m.mappings.Store(callID, traceID)
-		return nil
-	}
-	return fmt.Errorf("trace context not found for trace ID %s", traceID)
 }
 
 func (ctx *TraceContext) initSegmentObject(req types.SipRequest, uaType types.UAType) {
 	ctx.segment.Spans = make([]*agent.SpanObject, 0)
 	ctx.idMapping = make([]string, 0)
-	switch uaType {
-	case types.UAClient:
-		remoteURI, _ := utils.ExtractURIAndTag(req.To())
-		ctx.buildRootSpan(req.CallID(), req.MethodAsString(), remoteURI, req.CreatedAt())
-	case types.UAServer:
-		remoteURI, _ := utils.ExtractURIAndTag(req.From())
-		// 对于服务器端请求，使用From作为对端地址
-		ctx.buildRootSpan(req.CallID(), req.MethodAsString(), remoteURI, req.CreatedAt())
-	default:
-		// 未知UA类型，无法初始化Segment
-		err := fmt.Errorf("unknown UA type: %v", uaType)
-		log.Logger.WithError(err).Debugf("failed to inital segment: %v", uaType)
-	}
 	ctx.isInitalized = true
 }
 
@@ -139,42 +141,11 @@ func (ctx *TraceContext) FinishExistSpan(id string, isError bool, endTime int64)
 	log.Logger.Errorf("span with ID %s not found in trace context %s", id, ctx.traceID)
 }
 
-// 根Span是一个虚拟的Span，通常用于表示当前服务抓包的起点，主要用于解决in-dialog对话时出现多个fork dialog的情况，以及fs桥接会话时出现多条腿的情况。
-func (ctx *TraceContext) buildRootSpan(callID string, method string, remoteURI string, startTime int64) {
-	// 外呼场景FS作为下游只有上游组件获取traceID，所以根节点的ref肯定不为空
-	ref := sniffdata.NewSegmentReferenceBuilder().
-		WithTraceID(ctx.traceID).
-		WithParentTraceSegmentID("").  //  TODO 上下文暂时不支持，用空字符串替代，由OAP修改
-		WithParentSpanID(0).           //  TODO 上下文暂时不支持，用0替代，让OAP修改。记得打通ESL之后结合ESL的上下文修改
-		WithParentService("").         //  TODO 上下文暂时不支持，用空字符串替代，由OAP修改
-		WithParentServiceInstance(""). //  TODO 上下文暂时不支持，用空字符串替代，由OAP修改
-		WithParentEndpoint("").        //  TODO 上下文暂时不支持，用空字符串替代，由OAP修改
-		Build()
-	// 记录callID到idMapping中，方便后续查找
-	ctx.idMapping = append(ctx.idMapping, callID)
-	span := sniffdata.NewSpanBuilder().
-		WithSpanId(0).        // 根span的ID通常为0
-		WithParentSpanId(-1). // 根span没有父span
-		WithStartTime(startTime).
-		WithOperationName(strings.ToUpper(method)).
-		WithSpanType(agent.SpanType_Entry).
-		WithSpanLayer(agent.SpanLayer_Unknown). // 自定义场景在protobuf中未定义，统统为unknown
-		WithPeer(remoteURI).                    // 使用remoteURI作为对端地址
-		WithRef(ref).
-		Build()
-	ctx.segment.Spans = append(ctx.segment.Spans, span)
-}
-
 // 使用Dialog ID从idMapping中寻找parentID
 // 由于sip对话（dialog）> 事务（transaction），且事务不能嵌套事务，所以这里只有dialog可能为parent，
-// 也可能没有dialogID，此时对应out-dialog会话，parent固定为0
+// 也可能没有dialogID，此时对应out-dialog会话，parent固定为-1
 func (ctx *TraceContext) getParentSpanID(id string) int32 {
-	for i, record := range ctx.idMapping {
-		if record == id {
-			return int32(i)
-		}
-	}
-	return int32(0)
+	return int32(slices.Index(ctx.idMapping, id)) // 找不到返回-1
 }
 
 func (ctx *TraceContext) sendSegment(channel chan *v1.SniffData) {
@@ -185,4 +156,15 @@ func (ctx *TraceContext) sendSegment(channel chan *v1.SniffData) {
 	} else {
 		log.Logger.Warnf("TraceContext %s is not initialized or has no spans, skipping send", ctx.traceID)
 	}
+}
+
+func wrapWithPrefix(s string) string {
+	if strings.HasPrefix(s, PREFIX) {
+		return s
+	}
+	return fmt.Sprintf("%s%s", PREFIX, s)
+}
+
+func extractWithoutPrefix(s string) string {
+	return strings.TrimPrefix(s, PREFIX)
 }
