@@ -14,11 +14,17 @@ func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 	// 解析SIP消息
 	// 由于可能存在gopacket不能正确识别SIP layer的情况，当gopacket无法解析时，直接使用GoSip解析UDP数据包
 	p := frame.Packet
-	data := r.extraSIPByGoPacket(p)
-	if len(data) == 0 {
-		var udp []byte
-		data, udp = r.getUdpPayload(p)
-		srcPort, dstPort := ParseUDPHeaderPorts(udp)
+	// data := r.extraSIPByGoPacket(p)
+	// if len(data) == 0 {
+	// 	var udp []byte
+	// 	data, udp = r.getUdpPayload(p)
+	// 	srcPort, dstPort := ParseUDPHeaderPorts(udp)
+	// 	frame.Connection.SrcPort = srcPort
+	// 	frame.Connection.DstPort = dstPort
+	// }
+	data, udp := r.getUdpPayload(p)
+	srcPort, dstPort := ParseUDPHeaderPorts(udp)
+	if srcPort > 0 && dstPort > 0 {
 		frame.Connection.SrcPort = srcPort
 		frame.Connection.DstPort = dstPort
 	}
@@ -60,7 +66,7 @@ func (r *Receiver) analyseDirection(conn packet.Connection) sip.Direction {
 	} else if conn.DstHost == r.LocalIp {
 		return sip.DirectionInbound
 	}
-	log.Logger.Warnf("Unknown direction for connection: %s", conn)
+	log.Logger.Warnf("Unknown direction for connection: %+v", conn)
 	return sip.DirectionUnknown
 }
 

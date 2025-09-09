@@ -49,7 +49,7 @@ func NewDialogContext(req types.SipRequest) (*DialogContext, error) {
 		local := req.To()
 		remote := req.From()
 		return &DialogContext{
-			id:        utils.BuildDialogID(req, true),
+			id:        utils.BuildDialogID(req, false),
 			state:     state,
 			ua:        ua,
 			callID:    callID,

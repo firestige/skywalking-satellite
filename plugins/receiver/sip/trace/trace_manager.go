@@ -145,7 +145,11 @@ func (ctx *TraceContext) FinishExistSpan(id string, isError bool, endTime int64)
 // 由于sip对话（dialog）> 事务（transaction），且事务不能嵌套事务，所以这里只有dialog可能为parent，
 // 也可能没有dialogID，此时对应out-dialog会话，parent固定为-1
 func (ctx *TraceContext) getParentSpanID(id string) int32 {
-	return int32(slices.Index(ctx.idMapping, id)) // 找不到返回-1
+	parts := strings.Split(id, "|")
+	if len(parts) > 2 {
+		return 0
+	}
+	return -1
 }
 
 func (ctx *TraceContext) sendSegment(channel chan *v1.SniffData) {
