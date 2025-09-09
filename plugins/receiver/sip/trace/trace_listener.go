@@ -90,17 +90,19 @@ func (l *TraceListener) OnTransactionCreated(transaction types.Transaction) {
 		return
 	}
 	// 创建新的Span
-	dialogID := utils.BuildDialogID(transaction.Request())
+
 	method := transaction.Request().MethodAsString()
 	startTime := transaction.CreatedAt()
 	headers := transaction.Request().Headers()
 	switch transaction.UA() {
 	case types.UAClient:
 		remoteURI, _ := utils.ExtractURIAndTag(transaction.Request().To())
+		dialogID := utils.BuildDialogID(transaction.Request(), false)
 		ctx.CreateNewSpan(transaction.ID(), dialogID, method, remoteURI, startTime, headers)
 	case types.UAServer:
 		// 对于服务器端请求，使用From作为对端地址
 		remoteURI, _ := utils.ExtractURIAndTag(transaction.Request().From())
+		dialogID := utils.BuildDialogID(transaction.Request(), true)
 		ctx.CreateNewSpan(transaction.ID(), dialogID, method, remoteURI, startTime, headers)
 	}
 }

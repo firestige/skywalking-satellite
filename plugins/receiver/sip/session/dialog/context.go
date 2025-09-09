@@ -27,7 +27,6 @@ func NewDialogContext(req types.SipRequest) (*DialogContext, error) {
 		return nil, fmt.Errorf("invalid method %s for dialog creation", req.Method())
 	}
 	// TODO 注意早期对话没有TO头
-	id := utils.BuildDialogID(req)
 	ua := utils.ParseUAType(req)
 	callID := req.CallID()
 	state := &EarlyState{}
@@ -36,7 +35,7 @@ func NewDialogContext(req types.SipRequest) (*DialogContext, error) {
 		local := req.From()
 		remote := req.To()
 		return &DialogContext{
-			id:        id,
+			id:        utils.BuildDialogID(req, false),
 			state:     state,
 			ua:        ua,
 			callID:    callID,
@@ -50,7 +49,7 @@ func NewDialogContext(req types.SipRequest) (*DialogContext, error) {
 		local := req.To()
 		remote := req.From()
 		return &DialogContext{
-			id:        callID,
+			id:        utils.BuildDialogID(req, true),
 			state:     state,
 			ua:        ua,
 			callID:    callID,

@@ -63,10 +63,10 @@ func (dm *DialogManager) GetAllDialogs() []*DialogContext {
 
 func (dm *DialogManager) GetDialogBySipMessage(msg types.SipMessage) (*DialogContext, bool) {
 	// TODO 先不考虑fork场景，简化模型，统一到早期对话
-	dialogID := utils.BuildDialogID(msg)
+	dialogID := utils.BuildDialogID(msg, false)
 	ctx, exists := dm.store.Load(dialogID)
 	if !exists {
-		dialogID := utils.BuildDialogID(msg)
+		dialogID := utils.BuildDialogID(msg, true)
 		ctx, exists = dm.store.Load(dialogID)
 		if !exists {
 			return nil, false // 如果对话不存在，返回 nil 和 false

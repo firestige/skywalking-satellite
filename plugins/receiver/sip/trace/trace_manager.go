@@ -111,7 +111,7 @@ func (ctx *TraceContext) CreateNewSpan(id, parent, method, remoteURI string, sta
 		return
 	}
 	spanID := len(ctx.idMapping)
-	parentID := ctx.getParentSpanID(parent)
+	parentID := ctx.getParentSpanID(id)
 	ctx.idMapping = append(ctx.idMapping, id)
 	// 创建新的Span
 	span := sniffdata.NewSpanBuilder().
