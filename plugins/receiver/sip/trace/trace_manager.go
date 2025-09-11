@@ -3,7 +3,6 @@ package trace
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 
@@ -18,23 +17,18 @@ import (
 var PREFIX = "SNIFFER-"
 
 type TraceContext struct {
-	traceID   string
-	idMapping []string // 使用dialog ID和transaction ID追踪spanID，value是dialog ID或transaction ID，index是spanID
-	segment   *agent.SegmentObject
+	traceID string
+	txID    string
+	segment *agent.SegmentObject
 
 	isInitalized bool // 是否已经初始化
 }
 
-func (ctx *TraceContext) addMsgToSpan(id string, msgs []types.SipMessage) {
+func (ctx *TraceContext) addMsgToSpan(msgs []types.SipMessage) {
 	if len(msgs) == 0 {
 		return
 	}
-	spanId := slices.Index(ctx.idMapping, id)
-	if spanId == -1 {
-		log.Logger.Errorf("span with ID %s not found in trace context %s, cannot add messages", id, ctx.traceID)
-		return
-	}
-	span := ctx.segment.Spans[spanId]
+	span := ctx.segment.Spans[0]
 	span.Tags = append(span.Tags, buildSequenceTag(msgs))
 }
 
@@ -60,8 +54,8 @@ type TraceManager struct {
 	traceContext      *sync.Map // key: trace ID
 }
 
-func (m *TraceManager) RemoveTraceContextByCallID(id string) {
-	m.traceContext.Delete(wrapWithPrefix(id))
+func (m *TraceManager) RemoveTraceContextByTransactionID(id string) {
+	m.traceContext.Delete(id)
 }
 
 func NewTraceManager(serviceName, serviceInstanceId string) *TraceManager {
@@ -72,51 +66,46 @@ func NewTraceManager(serviceName, serviceInstanceId string) *TraceManager {
 	}
 }
 
-func (m *TraceManager) GetTraceContextByTraceID(traceID string) (*TraceContext, bool) {
-	traceID = wrapWithPrefix(traceID)
-	ctx, exists := m.traceContext.Load(traceID)
+func (m *TraceManager) GetTraceContextByTransactionID(txID string) (*TraceContext, bool) {
+	ctx, exists := m.traceContext.Load(txID)
 	if !exists {
 		return nil, false
 	}
 	return ctx.(*TraceContext), true
 }
 
-func (m *TraceManager) CreateTraceContext(traceID string, createAt int64) *TraceContext {
-	traceID = wrapWithPrefix(traceID)
-	ctx, exists := m.traceContext.Load(traceID)
+func (m *TraceManager) CreateTraceContext(txID string, createAt int64) *TraceContext {
+	traceID := wrapWithPrefix(txID)
+	ctx, exists := m.traceContext.Load(txID)
 	if !exists {
 		// 创建新的TraceContext
 		segment := sniffdata.NewSegmentBuilder(m.serviceName, m.serviceInstanceId).WithTraceId(traceID).WithTimestamp(createAt).Build()
 		ctx = &TraceContext{
 			traceID:      traceID,
 			segment:      segment,
-			idMapping:    make([]string, 0), // 初始化idMapping
-			isInitalized: false,             // 初始状态为未初始化
+			txID:         txID,
+			isInitalized: false, // 初始状态为未初始化
 		}
-		m.traceContext.Store(traceID, ctx)
+		m.traceContext.Store(txID, ctx)
 	}
 	return ctx.(*TraceContext)
 }
 
-func (ctx *TraceContext) initSegmentObject(req types.SipRequest, uaType types.UAType) {
+func (ctx *TraceContext) initSegmentObject() {
 	ctx.segment.Spans = make([]*agent.SpanObject, 0)
-	ctx.idMapping = make([]string, 0)
 	ctx.isInitalized = true
 }
 
-func (ctx *TraceContext) CreateNewSpan(id, parent, method, remoteURI string, startTime int64, headers map[string]string) {
+func (ctx *TraceContext) CreateNewSpan(id, method, remoteURI string, startTime int64, headers map[string]string) {
 	if !ctx.isInitalized {
 		// 快速失败，没有初始化的TraceContext无法创建新的Span
 		log.Logger.Errorf("TraceContext not initialized, cannot create new span for ID: %s", id)
 		return
 	}
-	spanID := len(ctx.idMapping)
-	parentID := ctx.getParentSpanID(id)
-	ctx.idMapping = append(ctx.idMapping, id)
 	// 创建新的Span
 	span := sniffdata.NewSpanBuilder().
-		WithSpanId(int32(spanID)).
-		WithParentSpanId(parentID).
+		WithSpanId(0).
+		WithParentSpanId(-1).
 		WithStartTime(startTime).
 		WithOperationName(strings.ToUpper(method)).
 		WithHeaders(headers).
@@ -128,28 +117,15 @@ func (ctx *TraceContext) CreateNewSpan(id, parent, method, remoteURI string, sta
 }
 
 func (ctx *TraceContext) FinishExistSpan(id string, isError bool, endTime int64) {
-	for i, record := range ctx.idMapping {
-		if record == id {
-			span := ctx.segment.Spans[i]
-			span.EndTime = endTime
-			span.IsError = isError
-			log.Logger.Infof("Finished span with ID %s in trace context %s, from: %d to %d", id, ctx.traceID, span.StartTime, span.EndTime)
-			return
-		}
+	if ctx.txID == id {
+		span := ctx.segment.Spans[0]
+		span.EndTime = endTime
+		span.IsError = isError
+		log.Logger.Infof("Finished span with ID %s in trace context %s, from: %d to %d", id, ctx.traceID, span.StartTime, span.EndTime)
+		return
 	}
 	// TODO 讨论是不是预定义ErrNotFound然后用log.Logger.WithError(ErrNotFound).Errorf()比较好
 	log.Logger.Errorf("span with ID %s not found in trace context %s", id, ctx.traceID)
-}
-
-// 使用Dialog ID从idMapping中寻找parentID
-// 由于sip对话（dialog）> 事务（transaction），且事务不能嵌套事务，所以这里只有dialog可能为parent，
-// 也可能没有dialogID，此时对应out-dialog会话，parent固定为-1
-func (ctx *TraceContext) getParentSpanID(id string) int32 {
-	parts := strings.Split(id, "|")
-	if len(parts) > 2 {
-		return 0
-	}
-	return -1
 }
 
 func (ctx *TraceContext) sendSegment(channel chan *v1.SniffData) {
@@ -166,7 +142,12 @@ func wrapWithPrefix(s string) string {
 	if strings.HasPrefix(s, PREFIX) {
 		return s
 	}
-	return fmt.Sprintf("%s%s", PREFIX, s)
+	idx := strings.Index(s, "|")
+	if idx < 0 {
+		return s
+	}
+	// 如果包含|，只对|前面的部分添加前缀
+	return fmt.Sprintf("%s%s", PREFIX, s[:idx])
 }
 
 func extractWithoutPrefix(s string) string {
