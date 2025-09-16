@@ -2,13 +2,24 @@ package sip
 
 import (
 	"bytes"
+	"slices"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	sip "github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 	packet "github.com/apache/skywalking-satellite/plugins/server/local/packet/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
+
+var UNSUPPORTED_METHOD = []sip.Method{
+	sip.MethodOptions,
+	sip.MethodRegister,
+	sip.MethodPrack,
+	sip.MethodPublish,
+	sip.MethodRefer,
+	sip.MethodUpdate,
+}
 
 func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 	// 解析SIP消息
@@ -55,6 +66,13 @@ func (r *Receiver) processUDPFrame(frame *packet.RawFrameData) error {
 		goSipMsg.StartLine(), conn.SrcIp, conn.SrcPort, conn.DstIp, conn.DstPort)
 
 	sipMsg := FromGoSip(goSipMsg, conn, frame.Timestamp)
+
+	cSeq := sipMsg.CSeq()
+	method := utils.ExtractMethodFromCseq(cSeq)
+	if slices.Index(UNSUPPORTED_METHOD, method) > -1 {
+		log.Logger.Tracef("Unsupported SIP method: %s, CSeq: %s", method, cSeq)
+		return nil
+	}
 
 	r.handler.HandleMessage(sipMsg)
 	return nil

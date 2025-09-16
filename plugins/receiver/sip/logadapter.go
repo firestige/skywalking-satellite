@@ -94,5 +94,5 @@ func (la *LoggerAdapter) Panicf(format string, args ...interface{}) {
 }
 
 func (la *LoggerAdapter) SetLevel(level uint32) {
-	la.SetLevel(level)
+	la.logger.SetLevel(logrus.Level(level))
 }

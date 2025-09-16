@@ -9,6 +9,7 @@ import (
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/sniffdata"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
+	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
 	common "skywalking.apache.org/repo/goapi/collect/common/v3"
 	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
 	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
@@ -80,6 +81,7 @@ func (m *TraceManager) CreateTraceContext(txID string, createAt int64) *TraceCon
 	if !exists {
 		// 创建新的TraceContext
 		segment := sniffdata.NewSegmentBuilder(m.serviceName, m.serviceInstanceId).WithTraceId(traceID).WithTimestamp(createAt).Build()
+		segment.TraceSegmentId = renewSegmentID(txID)
 		ctx = &TraceContext{
 			traceID:      traceID,
 			segment:      segment,
@@ -102,8 +104,8 @@ func (ctx *TraceContext) CreateNewSpan(id, method, remoteURI string, startTime i
 		log.Logger.Errorf("TraceContext not initialized, cannot create new span for ID: %s", id)
 		return
 	}
-	// 创建新的Span
-	span := sniffdata.NewSpanBuilder().
+
+	builder := sniffdata.NewSpanBuilder().
 		WithSpanId(0).
 		WithParentSpanId(-1).
 		WithStartTime(startTime).
@@ -111,8 +113,14 @@ func (ctx *TraceContext) CreateNewSpan(id, method, remoteURI string, startTime i
 		WithHeaders(headers).
 		WithSpanType(agent.SpanType_Local).     //为了方便管理先全部设置为Local
 		WithSpanLayer(agent.SpanLayer_Unknown). // 自定义场景在protobuf中未定义，统统为unknown
-		WithPeer(remoteURI).                    // 使用remoteURI作为对端地址
-		Build()
+		WithPeer(remoteURI)                     // 使用remoteURI作为对端地址
+
+	var span *agent.SpanObject
+	if method == "INVITE" && headers["X-ICC-CALL-ID"] != "" {
+		span = builder.WithTag("SHOULD_UPDATE_REF", "TRUE").Build()
+	} else {
+		span = builder.Build()
+	}
 	ctx.segment.Spans = append(ctx.segment.Spans, span)
 }
 
@@ -152,4 +160,14 @@ func wrapWithPrefix(s string) string {
 
 func extractWithoutPrefix(s string) string {
 	return strings.TrimPrefix(s, PREFIX)
+}
+
+func renewSegmentID(txID string) string {
+	idx := strings.LastIndex(txID, "|")
+	if idx < 0 {
+		return txID
+	}
+	ip := utils.GetNetworkInterfaceIP("eth0")
+	p1 := strings.ReplaceAll(txID[:idx], "|", ".")
+	return fmt.Sprintf("%s.%s", p1, ip)
 }

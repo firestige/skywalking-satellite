@@ -100,7 +100,6 @@ type SpanBuilder struct {
 	Tags          []*common.KeyStringValuePair
 	Logs          []*agent.Log
 	SkipAnalysis  bool
-	parent        *SegmentBuilder
 }
 
 func NewSpanBuilder() *SpanBuilder {
@@ -347,6 +346,10 @@ func NewSegmentIDGenerator(instanceId string) *SegmentIDGenerator {
 }
 
 func (g *SegmentIDGenerator) Generate() string {
+	return g.origin()
+}
+
+func (g *SegmentIDGenerator) origin() string {
 	g.mutex.Lock()
 	defer g.mutex.Unlock()
 
