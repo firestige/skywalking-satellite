@@ -80,6 +80,7 @@ func (m *TraceManager) CreateTraceContext(txID string, createAt int64) *TraceCon
 	ctx, exists := m.traceContext.Load(txID)
 	if !exists {
 		// 创建新的TraceContext
+
 		segment := sniffdata.NewSegmentBuilder(m.serviceName, m.serviceInstanceId).WithTraceId(traceID).WithTimestamp(createAt).Build()
 		segment.TraceSegmentId = renewSegmentID(txID)
 		ctx = &TraceContext{
@@ -104,7 +105,7 @@ func (ctx *TraceContext) CreateNewSpan(id, method, remoteURI string, startTime i
 		log.Logger.Errorf("TraceContext not initialized, cannot create new span for ID: %s", id)
 		return
 	}
-
+	component := getComponentIdFromServiceName(ctx.segment.Service)
 	builder := sniffdata.NewSpanBuilder().
 		WithSpanId(0).
 		WithParentSpanId(-1).
@@ -113,8 +114,8 @@ func (ctx *TraceContext) CreateNewSpan(id, method, remoteURI string, startTime i
 		WithHeaders(headers).
 		WithSpanType(agent.SpanType_Local).     //为了方便管理先全部设置为Local
 		WithSpanLayer(agent.SpanLayer_Unknown). // 自定义场景在protobuf中未定义，统统为unknown
-		WithPeer(remoteURI)                     // 使用remoteURI作为对端地址
-
+		WithPeer(remoteURI).                    // 使用remoteURI作为对端地址
+		WithComponentId(component)
 	var span *agent.SpanObject
 	if method == "INVITE" && headers["X-ICC-CALL-ID"] != "" {
 		span = builder.WithTag("SHOULD_UPDATE_REF", "TRUE").Build()
@@ -122,6 +123,19 @@ func (ctx *TraceContext) CreateNewSpan(id, method, remoteURI string, startTime i
 		span = builder.Build()
 	}
 	ctx.segment.Spans = append(ctx.segment.Spans, span)
+}
+
+func getComponentIdFromServiceName(s string) int32 {
+	if strings.Contains(strings.ToUpper(s), "FREESWITCH") {
+		return 5600
+	}
+	if strings.Contains(strings.ToUpper(s), "KAMAILIO") {
+		return 5601
+	}
+	if strings.Contains(strings.ToUpper(s), "SBC") {
+		return 5602
+	}
+	return 0
 }
 
 func (ctx *TraceContext) FinishExistSpan(id string, isError bool, endTime int64) {
