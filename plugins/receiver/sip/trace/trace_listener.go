@@ -1,6 +1,8 @@
 package trace
 
 import (
+	"fmt"
+
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/sniffdata"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
@@ -25,12 +27,29 @@ func NewTraceListener(serviceName, serviceInstanceId string, submit func(*v1.Sni
 }
 
 func (l *TraceListener) OnRequest(req types.SipRequest, ua types.UAType) {
-
+	// 由于 UAC 和 UAS 的请求创建的 transactionid 相同，直接作为 segementID 会导致冲突
+	// 因此这里对 UAS 的请求做特殊处理，当 UAS 收到请求时，使用 Call-id.Method.LocalIP 作为 segmentID
+	// UAC 则继续使用 Call-id.Method.via[0].branch作为 segmentID
+	// 所以 segmentObjet 使用的 tranceID 直接用 Call-id 即可
+	ctx, exist := l.manager.GetTraceContextByTransactionID(req.CallID())
+	if !exist {
+		ctx = l.manager.CreateTraceContext(req.CallID(), req.CreatedAt())
+		ctx.initSegmentObject()
+	}
+	switch ua {
+	case types.UAClient:
+		ctx.segment.TraceSegmentId = fmt.Sprintf("%s.%s.%s", req.CallID(), req.MethodAsString(), req.ViaBranch())
+	case types.UAServer:
+		ctx.segment.TraceSegmentId = fmt.Sprintf("%s.%s.%s", req.CallID(), req.MethodAsString(), req.DstURI())
+	}
 }
 
 func (l *TraceListener) OnTransactionCreated(transaction types.Transaction) {
-	ctx := l.manager.CreateTraceContext(transaction.ID(), transaction.CreatedAt())
-	ctx.initSegmentObject()
+	ctx, exist := l.manager.GetTraceContextByTransactionID(transaction.ID())
+	if !exist {
+		log.Logger.Errorf("trace context not found for tx: %s", transaction.ID())
+		return
+	}
 
 	method := transaction.Request().MethodAsString()
 	startTime := transaction.CreatedAt()
@@ -38,11 +57,17 @@ func (l *TraceListener) OnTransactionCreated(transaction types.Transaction) {
 	switch transaction.UA() {
 	case types.UAClient:
 		remoteURI, _ := utils.ExtractURIAndTag(transaction.Request().To())
-		ctx.CreateNewSpan(transaction.ID(), method, remoteURI, startTime, headers)
+		ctx.CreateNewSpan(transaction.ID(), method, remoteURI, startTime, headers, len(transaction.Request().Via()) == 1, nil)
 	case types.UAServer:
 		// 对于服务器端请求，使用From作为对端地址
 		remoteURI, _ := utils.ExtractURIAndTag(transaction.Request().From())
-		ctx.CreateNewSpan(transaction.ID(), method, remoteURI, startTime, headers)
+		ref := sniffdata.NewSegmentReferenceBuilder().
+			WithNetworkAddressUsedAtPeer(remoteURI).
+			WithParentEndpoint(method).
+			WithParentTraceSegmentID(fmt.Sprintf("%s.%s.%s", transaction.Request().CallID(), transaction.Request().MethodAsString(), transaction.Request().ViaBranch())).
+			WithTraceID(fmt.Sprintf("SNIFFER-%s", transaction.Request().CallID())).
+			Build()
+		ctx.CreateNewSpan(transaction.ID(), method, remoteURI, startTime, headers, false, ref)
 	}
 }
 

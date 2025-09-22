@@ -109,6 +109,15 @@ func (m *sipMessage) To() string {
 	return to.Value()
 }
 
+func (m *sipMessage) Via() []string {
+	vias, _ := m.delegate.Via()
+	results := make([]string, 0, len(vias))
+	for _, via := range vias {
+		results = append(results, via.String())
+	}
+	return results
+}
+
 func (m *sipMessage) ViaBranch() string {
 	via, _ := m.delegate.Via()
 	return utils.GetBranchFromVia(via.Value())

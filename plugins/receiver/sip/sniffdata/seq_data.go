@@ -16,10 +16,11 @@ type SipSequenceData struct {
 	Local     string `json:"local"`
 	Timestamp int64  `json:"timestamp"`
 	RefID     string `json:"ref_id"` // 对话ID或事务ID
+	IsError   bool   `json:"is_error,omitempty"`
 }
 
 func NewSipSequenceData(msg types.SipMessage) *SipSequenceData {
-	return &SipSequenceData{
+	data := &SipSequenceData{
 		RawMsg:    msg.String(),
 		IsRequest: msg.IsRequest(),
 		From:      msg.SrcURI(),   // ip 可能要通过dns 解析获得
@@ -28,6 +29,12 @@ func NewSipSequenceData(msg types.SipMessage) *SipSequenceData {
 		Timestamp: msg.CreatedAt(),
 		RefID:     fmt.Sprintf("%s/%s", msg.CallID(), strings.ReplaceAll(msg.CSeq(), " ", "_")),
 	}
+	if resp, ok := msg.(types.SipResponse); ok {
+		if resp.Status() >= 400 {
+			data.IsError = true
+		}
+	}
+	return data
 }
 
 func (data *SipSequenceData) String() string {

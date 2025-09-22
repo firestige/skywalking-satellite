@@ -105,6 +105,7 @@ func (r *Receiver) attempToSkipUnwantedData(data []byte) ([]byte, int) {
 		[]byte(sip.MethodInfo),
 		[]byte(sip.MethodPrack),
 		[]byte(sip.MethodPublish),
+		[]byte("SIP/2.0"), // 200 OK, 404 Not Found等响应行
 	}
 	// 找到首行的CRLF
 	crlfIdx := bytes.Index(data, []byte{'\r', '\n'})

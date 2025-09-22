@@ -99,7 +99,7 @@ func (ctx *TraceContext) initSegmentObject() {
 	ctx.isInitalized = true
 }
 
-func (ctx *TraceContext) CreateNewSpan(id, method, remoteURI string, startTime int64, headers map[string]string) {
+func (ctx *TraceContext) CreateNewSpan(id, method, remoteURI string, startTime int64, headers map[string]string, shouldUpdateRef bool, ref *agent.SegmentReference) {
 	if !ctx.isInitalized {
 		// 快速失败，没有初始化的TraceContext无法创建新的Span
 		log.Logger.Errorf("TraceContext not initialized, cannot create new span for ID: %s", id)
@@ -112,12 +112,15 @@ func (ctx *TraceContext) CreateNewSpan(id, method, remoteURI string, startTime i
 		WithStartTime(startTime).
 		WithOperationName(strings.ToUpper(method)).
 		WithHeaders(headers).
-		WithSpanType(agent.SpanType_Local).     //为了方便管理先全部设置为Local
+		WithSpanType(agent.SpanType_Entry).     //为了方便管理先全部设置为Entry
 		WithSpanLayer(agent.SpanLayer_Unknown). // 自定义场景在protobuf中未定义，统统为unknown
 		WithPeer(remoteURI).                    // 使用remoteURI作为对端地址
 		WithComponentId(component)
+	if ref != nil {
+		builder = builder.WithRef(ref)
+	}
 	var span *agent.SpanObject
-	if method == "INVITE" && headers["X-ICC-CALL-ID"] != "" {
+	if shouldUpdateRef {
 		span = builder.WithTag("SHOULD_UPDATE_REF", "TRUE").Build()
 	} else {
 		span = builder.Build()
@@ -160,6 +163,7 @@ func (ctx *TraceContext) sendSegment(channel chan *v1.SniffData) {
 	}
 }
 
+// 处理 traceID，一般是从 transactionID 转换而来，取｜的前半部分，并添加前缀 SNIFFER-
 func wrapWithPrefix(s string) string {
 	if strings.HasPrefix(s, PREFIX) {
 		return s
