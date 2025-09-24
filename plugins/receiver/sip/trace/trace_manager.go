@@ -23,6 +23,7 @@ type TraceContext struct {
 	segment *agent.SegmentObject
 
 	isInitalized bool // 是否已经初始化
+	isProxyNode  bool // 是否是调用链的转发节点
 }
 
 func (ctx *TraceContext) addMsgToSpan(msgs []types.SipMessage) {
@@ -181,11 +182,13 @@ func extractWithoutPrefix(s string) string {
 }
 
 func renewSegmentID(txID string) string {
-	idx := strings.LastIndex(txID, "|")
-	if idx < 0 {
+	parts := strings.Split(txID, "|")
+	if len(parts) < 3 {
 		return txID
 	}
+	callID := parts[0]
+	cseq := parts[1]
+	method := utils.ExtractMethodFromCseq(cseq)
 	ip := utils.GetNetworkInterfaceIP("eth0")
-	p1 := strings.ReplaceAll(txID[:idx], "|", ".")
-	return fmt.Sprintf("%s.%s", p1, ip)
+	return fmt.Sprintf("%s.%s.%s", callID, method, ip)
 }

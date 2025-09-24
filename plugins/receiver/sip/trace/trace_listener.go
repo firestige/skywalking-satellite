@@ -7,6 +7,7 @@ import (
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/sniffdata"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/utils"
+	agent "skywalking.apache.org/repo/goapi/collect/language/agent/v3"
 	v1 "skywalking.apache.org/repo/goapi/satellite/data/v1"
 )
 
@@ -27,29 +28,15 @@ func NewTraceListener(serviceName, serviceInstanceId string, submit func(*v1.Sni
 }
 
 func (l *TraceListener) OnRequest(req types.SipRequest, ua types.UAType) {
-	// 由于 UAC 和 UAS 的请求创建的 transactionid 相同，直接作为 segementID 会导致冲突
-	// 因此这里对 UAS 的请求做特殊处理，当 UAS 收到请求时，使用 Call-id.Method.LocalIP 作为 segmentID
-	// UAC 则继续使用 Call-id.Method.via[0].branch作为 segmentID
-	// 所以 segmentObjet 使用的 tranceID 直接用 Call-id 即可
-	ctx, exist := l.manager.GetTraceContextByTransactionID(req.CallID())
-	if !exist {
-		ctx = l.manager.CreateTraceContext(req.CallID(), req.CreatedAt())
-		ctx.initSegmentObject()
-	}
-	switch ua {
-	case types.UAClient:
-		ctx.segment.TraceSegmentId = fmt.Sprintf("%s.%s.%s", req.CallID(), req.MethodAsString(), req.ViaBranch())
-	case types.UAServer:
-		ctx.segment.TraceSegmentId = fmt.Sprintf("%s.%s.%s", req.CallID(), req.MethodAsString(), req.DstURI())
-	}
+
 }
 
 func (l *TraceListener) OnTransactionCreated(transaction types.Transaction) {
-	ctx, exist := l.manager.GetTraceContextByTransactionID(transaction.ID())
-	if !exist {
-		log.Logger.Errorf("trace context not found for tx: %s", transaction.ID())
-		return
-	}
+	ctx := l.manager.CreateTraceContext(transaction.ID(), transaction.CreatedAt())
+	ctx.initSegmentObject()
+
+	req := transaction.Request()
+	ctx.segment.TraceSegmentId = fmt.Sprintf("%s.%s.%s.%d", req.CallID(), req.CSeq(), req.ViaBranch(), transaction.UA())
 
 	method := transaction.Request().MethodAsString()
 	startTime := transaction.CreatedAt()
@@ -57,15 +44,30 @@ func (l *TraceListener) OnTransactionCreated(transaction types.Transaction) {
 	switch transaction.UA() {
 	case types.UAClient:
 		remoteURI, _ := utils.ExtractURIAndTag(transaction.Request().To())
-		ctx.CreateNewSpan(transaction.ID(), method, remoteURI, startTime, headers, len(transaction.Request().Via()) == 1, nil)
+		var ref *agent.SegmentReference
+		ref = nil
+		if len(req.Via()) > 1 {
+			ref = sniffdata.NewSegmentReferenceBuilder().
+				WithNetworkAddressUsedAtPeer(remoteURI).
+				WithTraceID(ctx.traceID).
+				WithParentTraceSegmentID(fmt.Sprintf("%s.%s.%s.%d", req.CallID(), req.CSeq(), utils.GetBranchFromVia(req.Via()[1]), types.UAServer)).
+				Build()
+			parentTxID := fmt.Sprintf("%s.%s.%s", req.CallID(), req.CSeq(), utils.GetBranchFromVia(req.Via()[1]))
+			pctx, exist := l.manager.GetTraceContextByTransactionID(parentTxID)
+			if exist {
+				// 如果找到了父事务的TraceContext，说明这是一个嵌套的调用，更新状态
+				pctx.isProxyNode = true
+			}
+		}
+		ctx.CreateNewSpan(transaction.ID(), method, remoteURI, startTime, headers, ref == nil, ref)
 	case types.UAServer:
 		// 对于服务器端请求，使用From作为对端地址
 		remoteURI, _ := utils.ExtractURIAndTag(transaction.Request().From())
 		ref := sniffdata.NewSegmentReferenceBuilder().
 			WithNetworkAddressUsedAtPeer(remoteURI).
-			WithParentEndpoint(method).
-			WithParentTraceSegmentID(fmt.Sprintf("%s.%s.%s", transaction.Request().CallID(), transaction.Request().MethodAsString(), transaction.Request().ViaBranch())).
-			WithTraceID(fmt.Sprintf("SNIFFER-%s", transaction.Request().CallID())).
+			WithTraceID(ctx.traceID).
+			WithParentSpanID(0).
+			WithParentTraceSegmentID(fmt.Sprintf("%s.%s.%s.%d", req.CallID(), req.CSeq(), req.ViaBranch(), types.UAClient)).
 			Build()
 		ctx.CreateNewSpan(transaction.ID(), method, remoteURI, startTime, headers, false, ref)
 	}
@@ -91,6 +93,12 @@ func (l *TraceListener) OnTransactionTerminated(tx types.Transaction) {
 	ctx.addMsgToSpan(msgs)
 	// 结束现有的Span
 	ctx.FinishExistSpan(tx.ID(), isError, tx.UpdatedAt())
+
+	// 如果是最后一个节点，刷新 SegmentId 以匹配 kafka事件中 parent Segment ID 的生成逻辑
+	if !ctx.isProxyNode {
+		ctx.segment.TraceSegmentId = renewSegmentID(tx.ID())
+	}
+
 	data := sniffdata.WrapWithSniffData(ctx.segment) // 发送Segment
 	l.submit(data)                                   // 提交Segment到输出通道
 	l.manager.RemoveTraceContextByTransactionID(tx.Request().CallID())
