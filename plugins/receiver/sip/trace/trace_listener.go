@@ -2,6 +2,7 @@ package trace
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/sniffdata"
@@ -95,17 +96,17 @@ func (l *TraceListener) OnTransactionTerminated(tx types.Transaction) {
 	ctx.FinishExistSpan(tx.ID(), isError, tx.UpdatedAt())
 
 	// 如果是最后一个节点，刷新 SegmentId 以匹配 kafka事件中 parent Segment ID 的生成逻辑
-	if !ctx.isProxyNode {
+	if !ctx.isProxyNode && tx.UA() == types.UAServer && strings.Contains(strings.ToLower(l.serviceName), "freeswitch") {
 		ctx.segment.TraceSegmentId = renewSegmentID(tx.ID())
 	}
 
 	data := sniffdata.WrapWithSniffData(ctx.segment) // 发送Segment
 	l.submit(data)                                   // 提交Segment到输出通道
-	l.manager.RemoveTraceContextByTransactionID(tx.Request().CallID())
+	l.manager.RemoveTraceContextByTransactionID(tx.ID())
 }
 
 func (l *TraceListener) OnTransactionTimeout(tx types.Transaction) {
-	ctx, exist := l.manager.GetTraceContextByTransactionID(tx.Request().CallID())
+	ctx, exist := l.manager.GetTraceContextByTransactionID(tx.ID())
 	if !exist {
 		log.Logger.Errorf("trace context not found for dialog with Call-ID: %s", tx.Request().CallID())
 		return
@@ -113,11 +114,11 @@ func (l *TraceListener) OnTransactionTimeout(tx types.Transaction) {
 	ctx.FinishExistSpan(tx.ID(), true, tx.UpdatedAt()) // 超时场景一定是错误
 	data := sniffdata.WrapWithSniffData(ctx.segment)   // 发送Segment
 	l.submit(data)                                     // 提交Segment到输出通道
-	l.manager.RemoveTraceContextByTransactionID(tx.Request().CallID())
+	l.manager.RemoveTraceContextByTransactionID(tx.ID())
 }
 
 func (l *TraceListener) OnTransactionError(tx types.Transaction, err error) {
-	ctx, exist := l.manager.GetTraceContextByTransactionID(tx.Request().CallID())
+	ctx, exist := l.manager.GetTraceContextByTransactionID(tx.ID())
 	if !exist {
 		log.Logger.Errorf("trace context not found for dialog with Call-ID: %s", tx.Request().CallID())
 		return
@@ -125,5 +126,5 @@ func (l *TraceListener) OnTransactionError(tx types.Transaction, err error) {
 	ctx.FinishExistSpan(tx.ID(), true, tx.UpdatedAt()) // 错误场景一定是错误
 	data := sniffdata.WrapWithSniffData(ctx.segment)   // 发送Segment
 	l.submit(data)                                     // 提交Segment到输出通道
-	l.manager.RemoveTraceContextByTransactionID(tx.Request().CallID())
+	l.manager.RemoveTraceContextByTransactionID(tx.ID())
 }

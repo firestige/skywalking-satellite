@@ -110,12 +110,21 @@ func (m *sipMessage) To() string {
 }
 
 func (m *sipMessage) Via() []string {
-	vias, _ := m.delegate.Via()
-	results := make([]string, 0, len(vias))
-	for _, via := range vias {
-		results = append(results, via.String())
+	headers := m.delegate.GetHeaders("Via")
+	if len(headers) > 1 {
+		results := make([]string, 0, len(headers))
+		for _, header := range headers {
+			results = append(results, header.Value())
+		}
+		return results
+	} else {
+		vias, _ := m.delegate.Via()
+		results := make([]string, 0, len(vias))
+		for _, via := range vias {
+			results = append(results, via.String())
+		}
+		return results
 	}
-	return results
 }
 
 func (m *sipMessage) ViaBranch() string {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/sniffdata"
@@ -61,11 +62,27 @@ func (m *TraceManager) RemoveTraceContextByTransactionID(id string) {
 }
 
 func NewTraceManager(serviceName, serviceInstanceId string) *TraceManager {
-	return &TraceManager{
+	m := &TraceManager{
 		serviceName:       serviceName,
 		serviceInstanceId: serviceInstanceId,
 		traceContext:      &sync.Map{},
 	}
+	go func() {
+		for {
+			m.printMetrics()
+			time.Sleep(time.Minute)
+		}
+	}()
+	return m
+}
+
+func (m *TraceManager) printMetrics() {
+	length := 0
+	m.traceContext.Range(func(_, _ interface{}) bool {
+		length++
+		return true
+	})
+	log.Logger.Infof("current trace context map size: %d", length)
 }
 
 func (m *TraceManager) GetTraceContextByTransactionID(txID string) (*TraceContext, bool) {
@@ -83,7 +100,7 @@ func (m *TraceManager) CreateTraceContext(txID string, createAt int64) *TraceCon
 		// 创建新的TraceContext
 
 		segment := sniffdata.NewSegmentBuilder(m.serviceName, m.serviceInstanceId).WithTraceId(traceID).WithTimestamp(createAt).Build()
-		segment.TraceSegmentId = renewSegmentID(txID)
+		// segment.TraceSegmentId = renewSegmentID(txID)
 		ctx = &TraceContext{
 			traceID:      traceID,
 			segment:      segment,
@@ -187,7 +204,7 @@ func renewSegmentID(txID string) string {
 		return txID
 	}
 	callID := parts[0]
-	cseq := parts[1]
+	cseq := strings.Replace(parts[1], "_", " ", 1)
 	method := utils.ExtractMethodFromCseq(cseq)
 	ip := utils.GetNetworkInterfaceIP("eth0")
 	return fmt.Sprintf("%s.%s.%s", callID, method, ip)

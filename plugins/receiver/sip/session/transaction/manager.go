@@ -2,6 +2,7 @@ package transaction
 
 import (
 	"sync"
+	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 	"github.com/apache/skywalking-satellite/plugins/receiver/sip/types"
@@ -14,10 +15,42 @@ type TransactionManager struct {
 }
 
 func NewTransactionManager() *TransactionManager {
-	return &TransactionManager{
+	m := &TransactionManager{
 		store:     &sync.Map{},
 		listeners: make([]types.TransactionListener, 0),
 	}
+	go func() {
+		for {
+			m.RemoveTerminatedTransaction()
+			m.printMetrics()
+			time.Sleep(1 * time.Minute)
+		}
+	}()
+	return m
+}
+
+func (m *TransactionManager) RemoveTerminatedTransaction() {
+	todo := make([]string, 0)
+	m.store.Range(func(key, value interface{}) bool {
+		tx := value.(*TransactionContext)
+		if tx.state.IsTerminated() && time.Since(time.Unix(tx.UpdatedAt(), 0)) > 2*time.Minute {
+			todo = append(todo, key.(string))
+		}
+		return true
+	})
+	for _, id := range todo {
+		m.store.Delete(id)
+		log.Logger.WithField("Transaction-ID", id).Infof("Removed terminated transaction")
+	}
+}
+
+func (m *TransactionManager) printMetrics() {
+	length := 0
+	m.store.Range(func(_, _ interface{}) bool {
+		length++
+		return true
+	})
+	log.Logger.Infof("current trace context map size: %d", length)
 }
 
 func (m *TransactionManager) RegisterListener(listener types.TransactionListener) {
