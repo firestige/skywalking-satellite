@@ -23,7 +23,7 @@ func NewTraceListener(serviceName, serviceInstanceId string, submit func(*v1.Sni
 	return &TraceListener{
 		serviceName:       serviceName,
 		serviceInstanceId: serviceInstanceId,
-		manager:           NewTraceManager(serviceName, serviceInstanceId),
+		manager:           NewTraceManager(serviceName, serviceInstanceId, submit),
 		submit:            submit,
 	}
 }

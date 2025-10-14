@@ -25,6 +25,7 @@ type TraceContext struct {
 
 	isInitalized bool // 是否已经初始化
 	isProxyNode  bool // 是否是调用链的转发节点
+	createAt     int64
 }
 
 func (ctx *TraceContext) addMsgToSpan(msgs []types.SipMessage) {
@@ -55,17 +56,42 @@ type TraceManager struct {
 	serviceName       string
 	serviceInstanceId string
 	traceContext      *sync.Map // key: trace ID
+	submit            func(*v1.SniffData)
+}
+
+func (m *TraceManager) RemoveOvertimeContext() {
+	todo := make([]string, 0)
+	m.traceContext.Range(func(key, value interface{}) bool {
+		ctx := value.(*TraceContext)
+		if time.Since(time.UnixMilli(ctx.createAt)) > 3*time.Minute {
+			todo = append(todo, key.(string))
+			ctx.FinishExistSpan(key.(string), true, time.Now().UnixMilli())
+			data := sniffdata.WrapWithSniffData(ctx.segment)
+			m.submit(data)
+			log.Logger.Tracef("Removing overtime trace context for transaction ID: %s", key.(string))
+		}
+		return true
+	})
+	for _, id := range todo {
+		m.traceContext.Delete(id)
+	}
+	log.Logger.Infof("Removed overtime context size: %d", len(todo))
 }
 
 func (m *TraceManager) RemoveTraceContextByTransactionID(id string) {
-	m.traceContext.Delete(id)
+	log.Logger.Infof("Removing trace context for transaction ID: %s", id)
+	_, loaded := m.traceContext.LoadAndDelete(id)
+	if !loaded {
+		log.Logger.Warnf("No trace context found for transaction ID: %s", id)
+	}
 }
 
-func NewTraceManager(serviceName, serviceInstanceId string) *TraceManager {
+func NewTraceManager(serviceName, serviceInstanceId string, submit func(*v1.SniffData)) *TraceManager {
 	m := &TraceManager{
 		serviceName:       serviceName,
 		serviceInstanceId: serviceInstanceId,
 		traceContext:      &sync.Map{},
+		submit:            submit,
 	}
 	go func() {
 		for {
@@ -106,6 +132,7 @@ func (m *TraceManager) CreateTraceContext(txID string, createAt int64) *TraceCon
 			segment:      segment,
 			txID:         txID,
 			isInitalized: false, // 初始状态为未初始化
+			createAt:     time.Now().UnixMilli(),
 		}
 		m.traceContext.Store(txID, ctx)
 	}

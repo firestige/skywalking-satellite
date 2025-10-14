@@ -33,15 +33,19 @@ func (m *TransactionManager) RemoveTerminatedTransaction() {
 	todo := make([]string, 0)
 	m.store.Range(func(key, value interface{}) bool {
 		tx := value.(*TransactionContext)
-		if tx.state.IsTerminated() && time.Since(time.Unix(tx.UpdatedAt(), 0)) > 2*time.Minute {
+		if tx.state.IsTerminated() && time.Since(time.UnixMilli(tx.UpdatedAt())) > 2*time.Minute {
+			todo = append(todo, key.(string))
+		} else if time.Since(time.UnixMilli(tx.UpdatedAt())) > 5*time.Minute {
+			// 超过5分钟的事务，强制删除
+			log.Logger.WithField("Transaction-ID", tx.ID()).Warnf("Force removing long-lived transaction, last updated at %d", tx.UpdatedAt())
 			todo = append(todo, key.(string))
 		}
 		return true
 	})
 	for _, id := range todo {
 		m.store.Delete(id)
-		log.Logger.WithField("Transaction-ID", id).Infof("Removed terminated transaction")
 	}
+	log.Logger.Infof("Removed terminated transaction size: %d", len(todo))
 }
 
 func (m *TransactionManager) printMetrics() {
