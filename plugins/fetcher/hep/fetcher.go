@@ -57,7 +57,6 @@ hep_config:
   discard_src_ip: ""
   discard_dst_ip: ""
   hep_server: "<hep_server>"
-  hep_node_pw: "mypassword"
   hep_node_id: 1234
   hep_node_name: "satellite_hep_node"
   network: "udp"
@@ -77,8 +76,32 @@ plugin_name: hep_fetcher
 }
 
 func (f *Fetcher) Prepare() {
+	applyConfig(f.HepConfig)
+
 	f.channel = make(chan *v1.SniffData, 100)
 	f.captture, _ = sniffer.New(f.HepConfig)
+}
+
+func applyConfig(src *hepconfig.Config) {
+	hepconfig.Cfg.Iface.Device = src.Iface.Device
+	hepconfig.Cfg.Iface.Type = src.Iface.Type
+	hepconfig.Cfg.Iface.PortRange = src.Iface.PortRange
+	hepconfig.Cfg.Iface.Snaplen = src.Iface.Snaplen
+	hepconfig.Cfg.Iface.BufferSizeMb = src.Iface.BufferSizeMb
+	hepconfig.Cfg.Iface.EOFExit = src.Iface.EOFExit
+	hepconfig.Cfg.Iface.FanoutID = src.Iface.FanoutID
+	hepconfig.Cfg.Mode = src.Mode
+	hepconfig.Cfg.Dedup = src.Dedup
+	hepconfig.Cfg.Filter = src.Filter
+	hepconfig.Cfg.Discard = src.Discard
+	hepconfig.Cfg.DiscardMethod = src.DiscardMethod
+	hepconfig.Cfg.DiscardIP = src.DiscardIP
+	hepconfig.Cfg.DiscardSrcIP = src.DiscardSrcIP
+	hepconfig.Cfg.DiscardDstIP = src.DiscardDstIP
+	hepconfig.Cfg.HepServer = src.HepServer
+	hepconfig.Cfg.HepNodeName = src.HepNodeName
+	hepconfig.Cfg.Reassembly = src.Reassembly
+	hepconfig.Cfg.SipAssembly = src.SipAssembly
 }
 
 func (f *Fetcher) Fetch(ctx context.Context) {

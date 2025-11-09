@@ -6,6 +6,7 @@ import (
 	"net"
 	strings "strings"
 
+	"github.com/apache/skywalking-satellite/plugins/fetcher/hep/config"
 	"github.com/apache/skywalking-satellite/plugins/fetcher/hep/decoder"
 )
 
@@ -70,11 +71,10 @@ func EncodeHEP(h *decoder.Packet) (hepMsg []byte, err error) {
 		Tmsec:     h.Tmsec,
 		ProtoType: h.ProtoType,
 		// NodeID:    uint32(config.Cfg.HepNodeID),
-		// NodePW:    config.Cfg.HepNodePW,
 		Payload: h.Payload,
 		CID:     h.CID,
 		Vlan:    h.Vlan,
-		// NodeName:  config.Cfg.HepNodeName,
+		NodeName:  config.Cfg.HepNodeName,
 		Mos:     h.Mos,
 		TCPFlag: h.TCPFlag,
 		IPTos:   h.IPTos,
