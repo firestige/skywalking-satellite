@@ -2,9 +2,10 @@ package config
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
-var Cfg Config
+var cfgValue atomic.Value // stores *Config
 
 var WgExitGroup sync.WaitGroup
 
@@ -33,4 +34,23 @@ type InterfacesConfig struct {
 	BufferSizeMb int    `mapstructure:"buffer_size_mb"`
 	EOFExit      bool   `mapstructure:"eof_exit"`
 	FanoutID     uint   `mapstructure:"fanout_id"`
+}
+
+func init() {
+	// 初始化默认配置
+	cfgValue.Store(&Config{
+		Iface: &InterfacesConfig{},
+	})
+}
+
+func Store(cfg *Config) {
+	cfgValue.Store(cfg)
+}
+
+func Get() *Config {
+	v := cfgValue.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(*Config)
 }

@@ -45,7 +45,8 @@ func NewWorker(lt layers.LinkType) (Worker, error) {
 	var o publish.Outputer
 	var err error
 
-	o, err = publish.NewHEPOutputer(config.Cfg.HepServer)
+	cfg := config.Get()
+	o, err = publish.NewHEPOutputer(cfg.HepServer)
 	if err != nil {
 		return nil, err
 	}
@@ -81,8 +82,8 @@ func (sniffer *SnifferSetup) setFromConfig() error {
 		sniffer.bpf = "(tcp or sctp) and greater 42 and portrange " + sniffer.config.PortRange + " or (udp and greater 128 and portrange " + sniffer.config.PortRange + " or ip[6:2] & 0x1fff != 0 or ip6[6]=44) or (ip and ip[6] & 0x2 = 0 and ip[6:2] & 0x1fff = 0 and udp and udp[8] & 0xc0 = 0x80 and udp[9] >= 0xc8 && udp[9] <= 0xcc)"
 	}
 
-	log.Logger.Infof("%#v", config.Cfg)
-	log.Logger.Infof("%#v", config.Cfg.Iface)
+	log.Logger.Infof("%#v", config.Get())
+	log.Logger.Infof("%#v", config.Get().Iface)
 	log.Logger.Infof("bpf: %s", sniffer.bpf)
 	if len(sniffer.discard) > 0 {
 		log.Logger.Infof("discard: %#v", sniffer.discard)
@@ -134,8 +135,9 @@ func (sniffer *SnifferSetup) setFromConfig() error {
 func New(cfgMain *config.Config) (*SnifferSetup, error) {
 	var err error
 	sniffer := &SnifferSetup{}
-	sniffer.config = cfgMain.Iface
-	sniffer.mode = cfgMain.Mode
+	cfg := config.Get()
+	sniffer.config = cfg.Iface
+	sniffer.mode = cfg.Mode
 
 	if sniffer.config.Device == "any" && (runtime.GOOS == "windows" || runtime.GOOS == "darwin") {
 		_, err := ListDeviceNames(true, false)

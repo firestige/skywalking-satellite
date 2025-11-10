@@ -46,7 +46,7 @@ func (pub *Publisher) Start(pq chan *decoder.Packet) {
 		if pkt.Version == 255 {
 			//this is EXIT
 			log.Logger.Info("received exit signal")
-			if config.Cfg.Iface.EOFExit {
+			if config.Get().Iface.EOFExit {
 				log.Logger.Info("exiting...")
 				config.WgExitGroup.Done()
 				return

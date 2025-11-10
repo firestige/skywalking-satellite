@@ -196,18 +196,18 @@ func NewDecoder(datalink layers.LinkType) *Decoder {
 	d.parserUDP = gopacket.NewDecodingLayerParser(layers.LayerTypeUDP, &d.udp)
 	d.parserTCP = gopacket.NewDecodingLayerParser(layers.LayerTypeTCP, &d.tcp)
 
-	d.filter = strings.Split(strings.ToUpper(config.Cfg.DiscardMethod), ",")
-	d.filterIP = strings.Split(config.Cfg.DiscardIP, ",")
-	d.filterSrcIP = strings.Split(config.Cfg.DiscardSrcIP, ",")
-	d.filterDstIP = strings.Split(config.Cfg.DiscardDstIP, ",")
+	d.filter = strings.Split(strings.ToUpper(config.Get().DiscardMethod), ",")
+	d.filterIP = strings.Split(config.Get().DiscardIP, ",")
+	d.filterSrcIP = strings.Split(config.Get().DiscardSrcIP, ",")
+	d.filterDstIP = strings.Split(config.Get().DiscardDstIP, ",")
 
 	d.cachePayload = freecache.NewCache(1024 * 1024 * 1024)
 	d.lastStatTime = time.Now()
-	if config.Cfg.Dedup {
+	if config.Get().Dedup {
 		d.dedupCache = freecache.NewCache(20 * 1024 * 1024) // 20 MB
 	}
 
-	if config.Cfg.Reassembly {
+	if config.Get().Reassembly {
 		streamFactory := &tcpStreamFactory{}
 		streamPool := tcpassembly.NewStreamPool(streamFactory)
 		d.asm = tcpassembly.NewAssembler(streamPool)
@@ -230,7 +230,7 @@ func (d *Decoder) defragIP6(i6 layers.IPv6, i6frag layers.IPv6Fragment, t time.T
 }
 
 func (d *Decoder) Process(data []byte, ci *gopacket.CaptureInfo) {
-	if config.Cfg.Dedup {
+	if config.Get().Dedup {
 		if len(data) > 34 {
 			_, err := d.dedupCache.Get(data[34:])
 			if err == nil {
@@ -244,7 +244,7 @@ func (d *Decoder) Process(data []byte, ci *gopacket.CaptureInfo) {
 		}
 	}
 
-	if config.Cfg.DiscardMethod != "" {
+	if config.Get().DiscardMethod != "" {
 		c := internal.ParseCSeq(data)
 		if c != nil {
 			for _, v := range d.filter {
@@ -792,7 +792,7 @@ func (d *Decoder) checkTransport(srcIP net.IP, srcPort uint16, dstIP net.IP, dst
 }
 
 func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *layers.UDP, tcp *layers.TCP, sctp *layers.SCTP, flow gopacket.Flow, ci *gopacket.CaptureInfo, IPVersion, IPProtocol uint8, sIP, dIP net.IP) {
-	if config.Cfg.DiscardIP != "" {
+	if config.Get().DiscardIP != "" {
 		for _, v := range d.filterIP {
 			if dIP.String() == v {
 				log.Logger.Debugf("discarding destination IP: %s", dIP.String())
@@ -804,7 +804,7 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 			}
 		}
 	}
-	if config.Cfg.DiscardSrcIP != "" {
+	if config.Get().DiscardSrcIP != "" {
 		for _, v := range d.filterSrcIP {
 			if sIP.String() == v {
 				log.Logger.Debugf("discarding source IP: %s", sIP.String())
@@ -812,7 +812,7 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 			}
 		}
 	}
-	if config.Cfg.DiscardDstIP != "" {
+	if config.Get().DiscardDstIP != "" {
 		for _, v := range d.filterDstIP {
 			if dIP.String() == v {
 				log.Logger.Debugf("discarding destination IP: %s", dIP.String())
@@ -848,7 +848,7 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 			atomic.AddUint64(&d.udpCount, 1)
 			log.Logger.Debugf("payload - UDP: %s", string(pkt.Payload))
 
-			if config.Cfg.Mode == "SIPLOG" {
+			if config.Get().Mode == "SIPLOG" {
 				if udp.DstPort == 514 {
 					pkt.ProtoType, pkt.CID = correlateLOG(udp.Payload)
 					if pkt.ProtoType > 0 && pkt.CID != nil {
@@ -857,7 +857,7 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 					return
 				}
 			}
-			if config.Cfg.Mode != "SIP" {
+			if config.Get().Mode != "SIP" {
 				if (udp.Payload[0]&0xc0)>>6 == 2 {
 					if (udp.Payload[1] == 200 || udp.Payload[1] == 201 || udp.Payload[1] == 207) && udp.SrcPort%2 != 0 && udp.DstPort%2 != 0 {
 						pkt.Payload, pkt.CID = correlateRTCP(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, udp.Payload)
@@ -870,7 +870,7 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 						atomic.AddUint64(&d.rtcpFailCount, 1)
 						return
 					} else if udp.SrcPort%2 == 0 && udp.DstPort%2 == 0 {
-						if config.Cfg.Mode == "SIPRTP" {
+						if config.Get().Mode == "SIPRTP" {
 							log.Logger.Debugf("rtp: %v", protos.NewRTP(udp.Payload))
 						}
 						pkt.Payload = nil
@@ -886,12 +886,12 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 			atomic.AddUint64(&d.tcpCount, 1)
 			log.Logger.Debugf("payload - TCP: %v", pkt)
 
-			if config.Cfg.Reassembly {
+			if config.Get().Reassembly {
 				d.asm.AssembleWithTimestamp(flow, tcp, ci.Timestamp)
 				return
 			}
 
-			if config.Cfg.SipAssembly {
+			if config.Get().SipAssembly {
 				var checkResult bool
 				checkResult, payloadList = d.checkTransport(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, tcp)
 				if !checkResult || payloadList.Len() <= 0 {
@@ -980,7 +980,7 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 
 func (d *Decoder) ProcessHEPPacket(data []byte) {
 
-	if config.Cfg.DiscardMethod != "" {
+	if config.Get().DiscardMethod != "" {
 		h, err := DecodeHEP(data)
 		if err == nil {
 			c := internal.ParseCSeq([]byte(h.Payload))

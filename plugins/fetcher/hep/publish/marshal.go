@@ -71,13 +71,13 @@ func EncodeHEP(h *decoder.Packet) (hepMsg []byte, err error) {
 		Tmsec:     h.Tmsec,
 		ProtoType: h.ProtoType,
 		// NodeID:    uint32(config.Cfg.HepNodeID),
-		Payload: h.Payload,
-		CID:     h.CID,
-		Vlan:    h.Vlan,
-		NodeName:  config.Cfg.HepNodeName,
-		Mos:     h.Mos,
-		TCPFlag: h.TCPFlag,
-		IPTos:   h.IPTos,
+		Payload:  h.Payload,
+		CID:      h.CID,
+		Vlan:     h.Vlan,
+		NodeName: config.Get().HepNodeName,
+		Mos:      h.Mos,
+		TCPFlag:  h.TCPFlag,
+		IPTos:    h.IPTos,
 	}
 	hepMsg, err = hep.Marshal()
 	return hepMsg, err
