@@ -2,7 +2,6 @@ package hep
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
 
@@ -46,7 +45,7 @@ hep_config:
     device: eth0
 	type: afpacket
 	rotation_time: 60
-	port_range: ""
+	port_range: "10000-50000"
 	snaplen: 65535
 	buffer_size_mb: 1024
 	eof_exit: false
@@ -68,59 +67,9 @@ plugin_name: hep_fetcher
 }
 
 func (f *Fetcher) Prepare() {
-	// 输出调用前的 HepConfig
-	{
-		b, err := json.Marshal(f.HepConfig)
-		if err != nil {
-			log.Logger.Errorf("failed to marshal HepConfig: %v", err)
-		} else {
-			log.Logger.Infof("Prepare: HepConfig before apply: %s", b)
-		}
-	}
-
-	applyConfig(f.HepConfig)
-
-	// 输出调用后的 hepconfig.Cfg
-	{
-		b, err := json.Marshal(hepconfig.Get())
-		if err != nil {
-			log.Logger.Errorf("failed to marshal hepconfig.Cfg: %v", err)
-		} else {
-			log.Logger.Infof("Prepare: hepconfig.Cfg after apply: %s", b)
-		}
-	}
 
 	f.channel = make(chan *v1.SniffData, 100)
 
-}
-
-func applyConfig(src *hepconfig.Config) {
-	// 构造新对象，原子更新
-	newCfg := &hepconfig.Config{
-		Iface: &hepconfig.InterfacesConfig{
-			Device:       src.Iface.Device,
-			Type:         src.Iface.Type,
-			PortRange:    src.Iface.PortRange,
-			Snaplen:      src.Iface.Snaplen,
-			BufferSizeMb: src.Iface.BufferSizeMb,
-			EOFExit:      src.Iface.EOFExit,
-			FanoutID:     src.Iface.FanoutID,
-		},
-		Mode:          src.Mode,
-		Dedup:         src.Dedup,
-		Filter:        src.Filter,
-		Discard:       src.Discard,
-		DiscardMethod: src.DiscardMethod,
-		DiscardIP:     src.DiscardIP,
-		DiscardSrcIP:  src.DiscardSrcIP,
-		DiscardDstIP:  src.DiscardDstIP,
-		HepServer:     src.HepServer,
-		HepNodeName:   src.HepNodeName,
-		Reassembly:    src.Reassembly,
-		SipAssembly:   src.SipAssembly,
-	}
-	// 原子存储
-	hepconfig.Store(newCfg)
 }
 
 func (f *Fetcher) Fetch(ctx context.Context) {
@@ -131,8 +80,8 @@ func (f *Fetcher) Fetch(ctx context.Context) {
 		return
 	}
 	if f.captture == nil {
-		return
 		log.Logger.Errorf("sniffer is nil, cannot run fetcher")
+		return
 	}
 	f.captture.Run()
 }

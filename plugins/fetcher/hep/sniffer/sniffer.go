@@ -41,18 +41,17 @@ type Worker interface {
 
 type WorkerFactory func(layers.LinkType) (Worker, error)
 
-func NewWorker(lt layers.LinkType) (Worker, error) {
+func NewWorker(lt layers.LinkType, cfg *config.Config) (Worker, error) {
 	var o publish.Outputer
 	var err error
 
-	cfg := config.Get()
 	o, err = publish.NewHEPOutputer(cfg.HepServer)
 	if err != nil {
 		return nil, err
 	}
 
 	p := publish.NewPublisher(o)
-	d := decoder.NewDecoder(lt)
+	d := decoder.NewDecoder(lt, cfg)
 	w := &MainWorker{publisher: p, decoder: d}
 	return w, nil
 }
@@ -61,7 +60,7 @@ func (mw *MainWorker) OnPacket(data []byte, ci *gopacket.CaptureInfo) {
 	mw.decoder.Process(data, ci)
 }
 
-func (sniffer *SnifferSetup) setFromConfig() error {
+func (sniffer *SnifferSetup) setFromConfig(cfg *config.Config) error {
 	// var err error
 
 	if sniffer.config.Snaplen <= 0 {
@@ -82,8 +81,8 @@ func (sniffer *SnifferSetup) setFromConfig() error {
 		sniffer.bpf = "(tcp or sctp) and greater 42 and portrange " + sniffer.config.PortRange + " or (udp and greater 128 and portrange " + sniffer.config.PortRange + " or ip[6:2] & 0x1fff != 0 or ip6[6]=44) or (ip and ip[6] & 0x2 = 0 and ip[6:2] & 0x1fff = 0 and udp and udp[8] & 0xc0 = 0x80 and udp[9] >= 0xc8 && udp[9] <= 0xcc)"
 	}
 
-	log.Logger.Infof("%#v", config.Get())
-	log.Logger.Infof("%#v", config.Get().Iface)
+	log.Logger.Infof("%#v", cfg)
+	log.Logger.Infof("%#v", cfg.Iface)
 	log.Logger.Infof("bpf: %s", sniffer.bpf)
 	if len(sniffer.discard) > 0 {
 		log.Logger.Infof("discard: %#v", sniffer.discard)
@@ -135,9 +134,8 @@ func (sniffer *SnifferSetup) setFromConfig() error {
 func New(cfgMain *config.Config) (*SnifferSetup, error) {
 	var err error
 	sniffer := &SnifferSetup{}
-	cfg := config.Get()
-	sniffer.config = cfg.Iface
-	sniffer.mode = cfg.Mode
+	sniffer.config = cfgMain.Iface
+	sniffer.mode = cfgMain.Mode
 
 	if sniffer.config.Device == "any" && (runtime.GOOS == "windows" || runtime.GOOS == "darwin") {
 		_, err := ListDeviceNames(true, false)
@@ -149,12 +147,12 @@ func New(cfgMain *config.Config) (*SnifferSetup, error) {
 		return nil, fmt.Errorf("%v Please use one of the above devices", err)
 	}
 
-	err = sniffer.setFromConfig()
+	err = sniffer.setFromConfig(cfgMain)
 	if err != nil {
 		return nil, err
 	}
 
-	sniffer.worker, err = NewWorker(sniffer.Datalink())
+	sniffer.worker, err = NewWorker(sniffer.Datalink(), cfgMain)
 	if err != nil {
 		return nil, err
 	}

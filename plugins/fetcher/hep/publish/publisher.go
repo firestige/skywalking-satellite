@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-satellite/internal/pkg/log"
-	"github.com/apache/skywalking-satellite/plugins/fetcher/hep/config"
 	"github.com/apache/skywalking-satellite/plugins/fetcher/hep/decoder"
 )
 
@@ -46,11 +45,6 @@ func (pub *Publisher) Start(pq chan *decoder.Packet) {
 		if pkt.Version == 255 {
 			//this is EXIT
 			log.Logger.Info("received exit signal")
-			if config.Get().Iface.EOFExit {
-				log.Logger.Info("exiting...")
-				config.WgExitGroup.Done()
-				return
-			}
 			break
 		} else {
 
