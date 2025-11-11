@@ -111,11 +111,11 @@ type Packet struct {
 	ProtoType byte
 	Payload   []byte
 	CID       []byte
-	// Vlan      uint16
-	// Mos       uint16
-	// TCPFlag   uint8
-	// IPTos     uint8
-	NodeName string
+	Vlan      uint16
+	Mos       uint16
+	TCPFlag   uint8
+	IPTos     uint8
+	NodeName  string
 }
 
 // HEP chuncks
