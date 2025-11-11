@@ -43,7 +43,7 @@ func (f *Fetcher) DefaultConfig() string {
 hep_config:
   iface:
     device: eth0
-	type: afpacket
+	type: af_packet
 	rotation_time: 60
 	port_range: "10000-50000"
 	snaplen: 65535
@@ -67,9 +67,7 @@ plugin_name: hep_fetcher
 }
 
 func (f *Fetcher) Prepare() {
-
 	f.channel = make(chan *v1.SniffData, 100)
-
 }
 
 func (f *Fetcher) Fetch(ctx context.Context) {

@@ -266,7 +266,7 @@ func (d *Decoder) Process(data []byte, ci *gopacket.CaptureInfo) {
 		case layers.LayerTypeIPv4:
 			atomic.AddUint64(&d.ip4Count, 1)
 			if d.ip4.Flags&layers.IPv4DontFragment != 0 || (d.ip4.Flags&layers.IPv4MoreFragments == 0 && d.ip4.FragOffset == 0) {
-				d.processTransport(&d.decodedLayers, &d.udp, &d.tcp, &d.sctp, d.ip4.NetworkFlow(), ci, 0x02, uint8(d.ip4.Protocol), d.ip4.SrcIP, d.ip4.DstIP)
+				d.processTransport(&d.decodedLayers, &d.eth, &d.ip4, &d.ip6, &d.udp, &d.tcp, &d.sctp, d.ip4.NetworkFlow(), ci, 0x02, uint8(d.ip4.Protocol), d.ip4.SrcIP, d.ip4.DstIP)
 				break
 			}
 
@@ -281,7 +281,7 @@ func (d *Decoder) Process(data []byte, ci *gopacket.CaptureInfo) {
 			}
 
 			if ip4New.Length == ip4Len {
-				d.processTransport(&d.decodedLayers, &d.udp, &d.tcp, &d.sctp, d.ip4.NetworkFlow(), ci, 0x02, uint8(d.ip4.Protocol), d.ip4.SrcIP, d.ip4.DstIP)
+				d.processTransport(&d.decodedLayers, &d.eth, &d.ip4, &d.ip6, &d.udp, &d.tcp, &d.sctp, d.ip4.NetworkFlow(), ci, 0x02, uint8(d.ip4.Protocol), d.ip4.SrcIP, d.ip4.DstIP)
 			} else {
 				log.Logger.WithField("source", "defrag").Debugf("%d byte fragment layer: %s with payload:\n%s\n%d byte re-assembled payload:\n%s\n\n",
 					ip4Len, d.decodedLayers, d.ip4.Payload, ip4New.Length, ip4New.Payload,
@@ -296,13 +296,13 @@ func (d *Decoder) Process(data []byte, ci *gopacket.CaptureInfo) {
 					log.Logger.Warn("unsupported IPv4 fragment layer")
 					return
 				}
-				d.processTransport(&d.decodedLayers, &d.udp, &d.tcp, &d.sctp, ip4New.NetworkFlow(), ci, 0x02, uint8(ip4New.Protocol), ip4New.SrcIP, ip4New.DstIP)
+				d.processTransport(&d.decodedLayers, &d.eth, &d.ip4, &d.ip6, &d.udp, &d.tcp, &d.sctp, ip4New.NetworkFlow(), ci, 0x02, uint8(ip4New.Protocol), ip4New.SrcIP, ip4New.DstIP)
 			}
 
 		case layers.LayerTypeIPv6:
 			atomic.AddUint64(&d.ip6Count, 1)
 			if d.ip6.NextHeader != layers.IPProtocolIPv6Fragment {
-				d.processTransport(&d.decodedLayers, &d.udp, &d.tcp, &d.sctp, d.ip6.NetworkFlow(), ci, 0x0a, uint8(d.ip6.NextHeader), d.ip6.SrcIP, d.ip6.DstIP)
+				d.processTransport(&d.decodedLayers, &d.eth, &d.ip4, &d.ip6, &d.udp, &d.tcp, &d.sctp, d.ip6.NetworkFlow(), ci, 0x0a, uint8(d.ip6.NextHeader), d.ip6.SrcIP, d.ip6.DstIP)
 				break
 			}
 
@@ -330,7 +330,7 @@ func (d *Decoder) Process(data []byte, ci *gopacket.CaptureInfo) {
 					log.Logger.Warn("unsupported IPv6 fragment layer")
 					return
 				}
-				d.processTransport(&d.decodedLayers, &d.udp, &d.tcp, &d.sctp, ip6New.NetworkFlow(), ci, 0x0a, uint8(ip6New.NextHeader), ip6New.SrcIP, ip6New.DstIP)
+				d.processTransport(&d.decodedLayers, &d.eth, &d.ip4, &d.ip6, &d.udp, &d.tcp, &d.sctp, ip6New.NetworkFlow(), ci, 0x0a, uint8(ip6New.NextHeader), ip6New.SrcIP, ip6New.DstIP)
 			}
 		}
 	}
@@ -794,7 +794,7 @@ func (d *Decoder) checkTransport(srcIP net.IP, srcPort uint16, dstIP net.IP, dst
 	return true, payloadList
 }
 
-func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *layers.UDP, tcp *layers.TCP, sctp *layers.SCTP, flow gopacket.Flow, ci *gopacket.CaptureInfo, IPVersion, IPProtocol uint8, sIP, dIP net.IP) {
+func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, eth *layers.Ethernet, ip4 *layers.IPv4, ip6 *layers.IPv6, udp *layers.UDP, tcp *layers.TCP, sctp *layers.SCTP, flow gopacket.Flow, ci *gopacket.CaptureInfo, IPVersion, IPProtocol uint8, sIP, dIP net.IP) {
 	if d.cfg.DiscardIP != "" {
 		for _, v := range d.filterIP {
 			if dIP.String() == v {
@@ -837,8 +837,6 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 	var payloadList *list.List
 	for _, layerType := range *foundLayerTypes {
 		switch layerType {
-		case layers.LayerTypeDot1Q:
-			pkt.Vlan = d.d1q.VLANIdentifier
 
 		case layers.LayerTypeUDP:
 			if len(udp.Payload) < 16 {
@@ -848,13 +846,14 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 
 			pkt.SrcPort = uint16(udp.SrcPort)
 			pkt.DstPort = uint16(udp.DstPort)
-			pkt.Payload = udp.Payload
+			pkt.Payload = buildFullPayload(foundLayerTypes, IPVersion, eth, ip4, ip6, tcp, udp, sctp)
 			atomic.AddUint64(&d.udpCount, 1)
 			log.Logger.Debugf("payload - UDP: %s", string(pkt.Payload))
 
 			if d.cfg.Mode == "SIPLOG" {
 				if udp.DstPort == 514 {
 					pkt.ProtoType, pkt.CID = correlateLOG(udp.Payload)
+					log.Logger.Infof("find protoType: %d, cid: %s", pkt.ProtoType, string(pkt.CID))
 					if pkt.ProtoType > 0 && pkt.CID != nil {
 						PacketQueue <- pkt
 					}
@@ -865,6 +864,7 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 				if (udp.Payload[0]&0xc0)>>6 == 2 {
 					if (udp.Payload[1] == 200 || udp.Payload[1] == 201 || udp.Payload[1] == 207) && udp.SrcPort%2 != 0 && udp.DstPort%2 != 0 {
 						pkt.Payload, pkt.CID = correlateRTCP(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, udp.Payload)
+						log.Logger.Infof("find protoType: %d, cid: %s", pkt.ProtoType, string(pkt.CID))
 						if pkt.Payload != nil {
 							pkt.ProtoType = 5
 							atomic.AddUint64(&d.rtcpCount, 1)
@@ -908,7 +908,7 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 					extractCID(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, elem.Value.([]byte))
 				}
 			} else {
-				pkt.Payload = tcp.Payload
+				pkt.Payload = buildFullPayload(foundLayerTypes, IPVersion, eth, ip4, ip6, tcp, udp, sctp)
 				extractCID(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, pkt.Payload)
 			}
 
@@ -917,9 +917,9 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, udp *l
 			pkt.DstPort = uint16(sctp.DstPort)
 			switch sctp.Payload[8] {
 			case 0: //DATA
-				pkt.Payload = sctp.Payload[16:]
+				pkt.Payload = buildFullPayload(foundLayerTypes, IPVersion, eth, ip4, ip6, tcp, udp, sctp)
 			case 64: //IDATA
-				pkt.Payload = sctp.Payload[20:]
+				pkt.Payload = buildFullPayload(foundLayerTypes, IPVersion, eth, ip4, ip6, tcp, udp, sctp)
 			}
 			atomic.AddUint64(&d.sctpCount, 1)
 			log.Logger.Debugf("payload - SCTP: %v", pkt)
@@ -1060,4 +1060,29 @@ func (pkt *Packet) GetCID() string {
 		return string(pkt.CID)
 	}
 	return ""
+}
+
+func buildFullPayload(foundLayerTypes *[]gopacket.LayerType, IPVersion uint8, eth *layers.Ethernet, ip4 *layers.IPv4, ip6 *layers.IPv6, tcp *layers.TCP, udp *layers.UDP, sctp *layers.SCTP) []byte {
+	var fullPayload []byte
+	fullPayload = append(fullPayload, eth.Contents...)
+	switch IPVersion {
+	case 0x02:
+		fullPayload = append(fullPayload, ip4.Contents...)
+	case 0x0a:
+		fullPayload = append(fullPayload, ip6.Contents...)
+	}
+	for _, layerType := range *foundLayerTypes {
+		switch layerType {
+		case layers.LayerTypeTCP:
+			fullPayload = append(fullPayload, tcp.Contents...)
+			fullPayload = append(fullPayload, tcp.Payload...)
+		case layers.LayerTypeUDP:
+			fullPayload = append(fullPayload, udp.Contents...)
+			fullPayload = append(fullPayload, udp.Payload...)
+		case layers.LayerTypeSCTP:
+			fullPayload = append(fullPayload, sctp.Contents...)
+			fullPayload = append(fullPayload, sctp.Payload...)
+		}
+	}
+	return fullPayload
 }
