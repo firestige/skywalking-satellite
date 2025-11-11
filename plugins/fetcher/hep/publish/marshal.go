@@ -22,15 +22,15 @@ const (
 	Tsec      = 9  // Chunk 0x0009 Unix timestamp, seconds
 	Tmsec     = 10 // Chunk 0x000a Unix timestamp, microseconds
 	ProtoType = 11 // Chunk 0x000b Protocol type (DNS, LOG, RTCP, SIP)
-	NodeID    = 12 // Chunk 0x000c Capture client ID
-	NodePW    = 14 // Chunk 0x000e Authentication key (plain text / TLS connection)
-	Payload   = 15 // Chunk 0x000f Captured packet payload
-	CID       = 17 // Chunk 0x0011 Correlation ID
-	Vlan      = 18 // Chunk 0x0012 VLAN
-	NodeName  = 19 // Chunk 0x0013 NodeName
-	TCPFlag   = 23 // Chunk 0x0017 TCP Flags
-	IPTos     = 24 // Chunk 0x0018 IP TOS
-	Mos       = 32 // Chunk 0x0020 MOS
+	// NodeID    = 12 // Chunk 0x000c Capture client ID
+	// NodePW    = 14 // Chunk 0x000e Authentication key (plain text / TLS connection)
+	Payload = 15 // Chunk 0x000f Captured packet payload
+	CID     = 17 // Chunk 0x0011 Correlation ID
+	// Vlan      = 18 // Chunk 0x0012 VLAN
+	NodeName = 19 // Chunk 0x0013 NodeName
+	// TCPFlag   = 23 // Chunk 0x0017 TCP Flags
+	// IPTos     = 24 // Chunk 0x0018 IP TOS
+	// Mos       = 32 // Chunk 0x0020 MOS
 
 )
 
@@ -45,15 +45,15 @@ type HepMsg struct {
 	Tsec      uint32
 	Tmsec     uint32
 	ProtoType byte
-	NodeID    uint32
-	NodePW    string
-	Payload   []byte
-	CID       []byte
-	Vlan      uint16
-	NodeName  string
-	Mos       uint16
-	TCPFlag   uint8
-	IPTos     uint8
+	// NodeID    uint32
+	// NodePW    string
+	Payload []byte
+	CID     []byte
+	// Vlan      uint16
+	NodeName string
+	// Mos       uint16
+	// TCPFlag   uint8
+	// IPTos     uint8
 }
 
 // EncodeHEP creates the HEP Packet which
@@ -70,13 +70,13 @@ func EncodeHEP(h *decoder.Packet) (hepMsg []byte, err error) {
 		Tmsec:     h.Tmsec,
 		ProtoType: h.ProtoType,
 		// NodeID:    uint32(config.Cfg.HepNodeID),
-		Payload:  h.Payload,
-		CID:      h.CID,
-		Vlan:     h.Vlan,
+		Payload: h.Payload,
+		CID:     h.CID,
+		// Vlan:     h.Vlan,
 		NodeName: h.NodeName,
-		Mos:      h.Mos,
-		TCPFlag:  h.TCPFlag,
-		IPTos:    h.IPTos,
+		// Mos:      h.Mos,
+		// TCPFlag:  h.TCPFlag,
+		// IPTos:    h.IPTos,
 	}
 	hepMsg, err = hep.Marshal()
 	return hepMsg, err
@@ -158,16 +158,16 @@ func (h *HepMsg) MarshalTo(dAtA []byte) (int, error) {
 	dAtA[i] = h.ProtoType
 	i++
 
-	i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x0c, 0x00, 0x0a})
-	binary.BigEndian.PutUint32(dAtA[i:], h.NodeID)
-	i += 4
+	// i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x0c, 0x00, 0x0a})
+	// binary.BigEndian.PutUint32(dAtA[i:], h.NodeID)
+	// i += 4
 
-	if h.NodePW != "" {
-		i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x0e})
-		binary.BigEndian.PutUint16(dAtA[i:], 6+uint16(len(h.NodePW)))
-		i += 2
-		i += copy(dAtA[i:], h.NodePW)
-	}
+	// if h.NodePW != "" {
+	// 	i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x0e})
+	// 	binary.BigEndian.PutUint16(dAtA[i:], 6+uint16(len(h.NodePW)))
+	// 	i += 2
+	// 	i += copy(dAtA[i:], h.NodePW)
+	// }
 
 	if h.CID != nil {
 		i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x11})
@@ -176,9 +176,9 @@ func (h *HepMsg) MarshalTo(dAtA []byte) (int, error) {
 		i += copy(dAtA[i:], h.CID)
 	}
 
-	i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x12, 0x00, 0x08})
-	binary.BigEndian.PutUint16(dAtA[i:], h.Vlan)
-	i += 2
+	// i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x12, 0x00, 0x08})
+	// binary.BigEndian.PutUint16(dAtA[i:], h.Vlan)
+	// i += 2
 
 	if h.NodeName != "" {
 		i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x13})
@@ -187,23 +187,23 @@ func (h *HepMsg) MarshalTo(dAtA []byte) (int, error) {
 		i += copy(dAtA[i:], h.NodeName)
 	}
 
-	if h.TCPFlag > 0 {
-		i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x17, 0x00, 0x07})
-		dAtA[i] = h.TCPFlag
-		i++
-	}
+	// if h.TCPFlag > 0 {
+	// 	i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x17, 0x00, 0x07})
+	// 	dAtA[i] = h.TCPFlag
+	// 	i++
+	// }
 
-	if h.IPTos > 0 {
-		i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x18, 0x00, 0x07})
-		dAtA[i] = h.IPTos
-		i++
-	}
+	// if h.IPTos > 0 {
+	// 	i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x18, 0x00, 0x07})
+	// 	dAtA[i] = h.IPTos
+	// 	i++
+	// }
 
-	if h.Mos > 0 {
-		i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x20, 0x00, 0x08})
-		binary.BigEndian.PutUint16(dAtA[i:], h.Mos)
-		i += 2
-	}
+	// if h.Mos > 0 {
+	// 	i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x20, 0x00, 0x08})
+	// 	binary.BigEndian.PutUint16(dAtA[i:], h.Mos)
+	// 	i += 2
+	// }
 
 	if h.Payload != nil {
 		i += copy(dAtA[i:], []byte{0x00, 0x00, 0x00, 0x0f})
@@ -231,9 +231,9 @@ func (h *HepMsg) Size() (n int) {
 	n += 4 + 2 + 4 // len(vendor) + len(chunk) + len(Tmsec)
 	n += 4 + 2 + 1 // len(vendor) + len(chunk) + len(ProtoType)
 	n += 4 + 2 + 4 // len(vendor) + len(chunk) + len(NodeID)
-	if h.NodePW != "" {
-		n += 4 + 2 + len(h.NodePW) // len(vendor) + len(chunk) + len(NodePW)
-	}
+	// if h.NodePW != "" {
+	// 	n += 4 + 2 + len(h.NodePW) // len(vendor) + len(chunk) + len(NodePW)
+	// }
 
 	if h.CID != nil {
 		n += 4 + 2 + len(h.CID) // len(vendor) + len(chunk) + len(CID)
@@ -243,17 +243,17 @@ func (h *HepMsg) Size() (n int) {
 		n += 4 + 2 + len(h.NodeName) // len(vendor) + len(chunk) + len(NodeName)
 	}
 
-	if h.TCPFlag > 0 {
-		n += 4 + 2 + 1 // len(vendor) + len(chunk) + len(TCPFlag)
-	}
+	// if h.TCPFlag > 0 {
+	// 	n += 4 + 2 + 1 // len(vendor) + len(chunk) + len(TCPFlag)
+	// }
 
-	if h.IPTos > 0 {
-		n += 4 + 2 + 1 // len(vendor) + len(chunk) + len(IPTos)
-	}
+	// if h.IPTos > 0 {
+	// 	n += 4 + 2 + 1 // len(vendor) + len(chunk) + len(IPTos)
+	// }
 
-	if h.Mos > 0 {
-		n += 4 + 2 + 2 // len(vendor) + len(chunk) + len(Mos)
-	}
+	// if h.Mos > 0 {
+	// 	n += 4 + 2 + 2 // len(vendor) + len(chunk) + len(Mos)
+	// }
 
 	if h.Payload != nil {
 		n += 4 + 2 + len(h.Payload) // len(vendor) + len(chunk) + len(Payload)
@@ -276,13 +276,13 @@ func (h *HepMsg) String() string {
 		fmt.Sprintf("Tsec:%v,", h.Tsec),
 		fmt.Sprintf("Tmsec:%v,", h.Tmsec),
 		fmt.Sprintf("ProtoType:%v,", h.ProtoType),
-		fmt.Sprintf("NodeID:%v,", h.NodeID),
-		fmt.Sprintf("NodePW:%s,", h.NodePW),
+		// fmt.Sprintf("NodeID:%v,", h.NodeID),
+		// fmt.Sprintf("NodePW:%s,", h.NodePW),
 		fmt.Sprintf("CID:%s,", h.CID),
-		fmt.Sprintf("Vlan:%v,", h.Vlan),
-		fmt.Sprintf("Mos:%v,", h.Mos),
-		fmt.Sprintf("IPTos:%v,", h.IPTos),
-		fmt.Sprintf("TCPFlags:%v,", h.TCPFlag),
+		// fmt.Sprintf("Vlan:%v,", h.Vlan),
+		// fmt.Sprintf("Mos:%v,", h.Mos),
+		// fmt.Sprintf("IPTos:%v,", h.IPTos),
+		// fmt.Sprintf("TCPFlags:%v,", h.TCPFlag),
 		`}`,
 	}, "")
 	return fmt.Sprintf("%s with Payload:\n%s", s, string(h.Payload))

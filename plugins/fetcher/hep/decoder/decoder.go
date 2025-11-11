@@ -111,11 +111,11 @@ type Packet struct {
 	ProtoType byte
 	Payload   []byte
 	CID       []byte
-	Vlan      uint16
-	Mos       uint16
-	TCPFlag   uint8
-	IPTos     uint8
-	NodeName  string
+	// Vlan      uint16
+	// Mos       uint16
+	// TCPFlag   uint8
+	// IPTos     uint8
+	NodeName string
 }
 
 // HEP chuncks
@@ -131,12 +131,12 @@ const (
 	Tsec      = 9  // Chunk 0x0009 Unix timestamp, seconds
 	Tmsec     = 10 // Chunk 0x000a Unix timestamp, microseconds
 	ProtoType = 11 // Chunk 0x000b Protocol type (DNS, LOG, RTCP, SIP)
-	NodeID    = 12 // Chunk 0x000c Capture client ID
-	NodePW    = 14 // Chunk 0x000e Authentication key (plain text / TLS connection)
-	Payload   = 15 // Chunk 0x000f Captured packet payload
-	CID       = 17 // Chunk 0x0011 Correlation ID
-	Vlan      = 18 // Chunk 0x0012 VLAN
-	NodeName  = 19 // Chunk 0x0013 NodeName
+	// NodeID    = 12 // Chunk 0x000c Capture client ID
+	// NodePW    = 14 // Chunk 0x000e Authentication key (plain text / TLS connection)
+	Payload = 15 // Chunk 0x000f Captured packet payload
+	CID     = 17 // Chunk 0x0011 Correlation ID
+	// Vlan      = 18 // Chunk 0x0012 VLAN
+	NodeName = 19 // Chunk 0x0013 NodeName
 )
 
 // HEP represents HEP packet
