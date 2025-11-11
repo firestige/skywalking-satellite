@@ -43,13 +43,13 @@ func (f *Fetcher) DefaultConfig() string {
 hep_config:
   iface:
     device: eth0
-	type: af_packet
-	rotation_time: 60
-	port_range: "10000-50000"
-	snaplen: 65535
-	buffer_size_mb: 1024
-	eof_exit: false
-	fanout_id: 1
+    type: af_packet
+    rotation_time: 60
+    port_range: "10000-50000"
+    snaplen: 65535
+    buffer_size_mb: 1024
+    eof_exit: false
+    fanout_id: 1
   mode: "SIPRTP"
   dedup: false
   filter: ""
