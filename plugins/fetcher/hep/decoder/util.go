@@ -40,7 +40,7 @@ func (p *Packet) MarshalJSON() ([]byte, error) {
 		ProtoType byte
 		Payload   string
 		CID       string
-		// Vlan      uint16
+		Vlan      uint16
 	}{
 		Version:   p.Version,
 		Protocol:  p.Protocol,
@@ -53,7 +53,7 @@ func (p *Packet) MarshalJSON() ([]byte, error) {
 		ProtoType: p.ProtoType,
 		Payload:   string(p.Payload),
 		CID:       string(p.CID),
-		// Vlan:      p.Vlan,
+		Vlan:      p.Vlan,
 	})
 }
 
