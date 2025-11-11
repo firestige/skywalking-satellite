@@ -27,6 +27,17 @@ var (
 	PacketQueue = make(chan *Packet, 20000)
 )
 
+const (
+	ProtoTypeUnknown  byte = 0x00 // 未知类型
+	ProtoTypeSIP      byte = 0x01 // SIP 信令
+	ProtoTypeRTP      byte = 0x04 // RTP 媒体
+	ProtoTypeRTCPJson byte = 0x05 // RTCP 控制 JSON 格式
+	ProtoTypeRTCPRaw  byte = 0x40 // RTCP 控制 原始格式
+	ProtoTypeSTUN     byte = 0x41 // STUN 协议
+	ProtoTypeDTLS     byte = 0x42 // DTLS 协议
+	ProtoTypeSIPLOG   byte = 0x64 // SIP 日志
+)
+
 type CachePayload struct {
 	SrcIP         net.IP `json:"src_ip" default:""`
 	SrcPort       uint16 `json:"src_port"`
@@ -283,7 +294,7 @@ func (d *Decoder) Process(data []byte, ci *gopacket.CaptureInfo) {
 			if ip4New.Length == ip4Len {
 				d.processTransport(&d.decodedLayers, &d.eth, &d.ip4, &d.ip6, &d.udp, &d.tcp, &d.sctp, d.ip4.NetworkFlow(), ci, 0x02, uint8(d.ip4.Protocol), d.ip4.SrcIP, d.ip4.DstIP)
 			} else {
-				log.Logger.WithField("source", "defrag").Debugf("%d byte fragment layer: %s with payload:\n%s\n%d byte re-assembled payload:\n%s\n\n",
+				log.Logger.WithField("source", "defrag").Infof("%d byte fragment layer: %s with payload:\n%s\n%d byte re-assembled payload:\n%s\n\n",
 					ip4Len, d.decodedLayers, d.ip4.Payload, ip4New.Length, ip4New.Payload,
 				)
 
@@ -317,7 +328,7 @@ func (d *Decoder) Process(data []byte, ci *gopacket.CaptureInfo) {
 					return
 				}
 
-				log.Logger.WithField("source", "defrag").Debugf("%d byte fragment layer: %s with payload:\n%s\n%d byte re-assembled payload:\n%s\n\n",
+				log.Logger.WithField("source", "defrag").Infof("%d byte fragment layer: %s with payload:\n%s\n%d byte re-assembled payload:\n%s\n\n",
 					d.ip6.Length, d.decodedLayers, d.ip6.Payload, ip6New.Length, ip6New.Payload,
 				)
 
@@ -798,11 +809,11 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, eth *l
 	if d.cfg.DiscardIP != "" {
 		for _, v := range d.filterIP {
 			if dIP.String() == v {
-				log.Logger.Debugf("discarding destination IP: %s", dIP.String())
+				log.Logger.Infof("discarding destination IP: %s", dIP.String())
 				return
 			}
 			if sIP.String() == v {
-				log.Logger.Debugf("discarding source IP: %s", sIP.String())
+				log.Logger.Infof("discarding source IP: %s", sIP.String())
 				return
 			}
 		}
@@ -810,7 +821,7 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, eth *l
 	if d.cfg.DiscardSrcIP != "" {
 		for _, v := range d.filterSrcIP {
 			if sIP.String() == v {
-				log.Logger.Debugf("discarding source IP: %s", sIP.String())
+				log.Logger.Infof("discarding source IP: %s", sIP.String())
 				return
 			}
 		}
@@ -818,7 +829,7 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, eth *l
 	if d.cfg.DiscardDstIP != "" {
 		for _, v := range d.filterDstIP {
 			if dIP.String() == v {
-				log.Logger.Debugf("discarding destination IP: %s", dIP.String())
+				log.Logger.Infof("discarding destination IP: %s", dIP.String())
 				return
 			}
 		}
@@ -848,7 +859,7 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, eth *l
 			pkt.DstPort = uint16(udp.DstPort)
 			pkt.Payload = buildFullPayload(foundLayerTypes, IPVersion, eth, ip4, ip6, tcp, udp, sctp)
 			atomic.AddUint64(&d.udpCount, 1)
-			log.Logger.Debugf("payload - UDP: %s", string(pkt.Payload))
+			log.Logger.Infof("payload - UDP: %s", string(pkt.Payload))
 
 			if d.cfg.Mode == "SIPLOG" {
 				if udp.DstPort == 514 {
@@ -864,9 +875,10 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, eth *l
 				if (udp.Payload[0]&0xc0)>>6 == 2 {
 					if (udp.Payload[1] == 200 || udp.Payload[1] == 201 || udp.Payload[1] == 207) && udp.SrcPort%2 != 0 && udp.DstPort%2 != 0 {
 						pkt.Payload, pkt.CID = correlateRTCP(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, udp.Payload)
+						// RTCP packet
 						log.Logger.Infof("find protoType: %d, cid: %s", pkt.ProtoType, string(pkt.CID))
 						if pkt.Payload != nil {
-							pkt.ProtoType = 5
+							pkt.ProtoType = ProtoTypeRTCPJson
 							atomic.AddUint64(&d.rtcpCount, 1)
 							PacketQueue <- pkt
 							return
@@ -875,20 +887,25 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, eth *l
 						return
 					} else if udp.SrcPort%2 == 0 && udp.DstPort%2 == 0 {
 						if d.cfg.Mode == "SIPRTP" {
-							log.Logger.Debugf("rtp: %v", protos.NewRTP(udp.Payload))
+							log.Logger.Infof("rtp: %v", protos.NewRTP(udp.Payload))
 						}
-						pkt.Payload = nil
+						// RTP packet
+						pkt.ProtoType = ProtoTypeRTP
+						pkt.CID = correlateRTP(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort)
+						pkt.Payload = buildFullPayload(foundLayerTypes, IPVersion, eth, ip4, ip6, tcp, udp, sctp)
 						return
 					}
 				}
-				extractCID(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, pkt.Payload)
+				// Non-SIP packet
+				log.Logger.Infof("non-SIP packet payload: %s", string(udp.Payload))
+				pkt.CID = extractCID(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, pkt.Payload)
 			}
 
 		case layers.LayerTypeTCP:
 			pkt.SrcPort = uint16(tcp.SrcPort)
 			pkt.DstPort = uint16(tcp.DstPort)
 			atomic.AddUint64(&d.tcpCount, 1)
-			log.Logger.Debugf("payload - TCP: %v", pkt)
+			log.Logger.Infof("payload - TCP: %v", pkt)
 
 			if d.cfg.Reassembly {
 				d.asm.AssembleWithTimestamp(flow, tcp, ci.Timestamp)
@@ -905,11 +922,11 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, eth *l
 				payloadList.PushBack(pkt.Payload)
 
 				for elem := payloadList.Front(); elem != nil; elem = elem.Next() {
-					extractCID(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, elem.Value.([]byte))
+					pkt.CID = extractCID(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, elem.Value.([]byte))
 				}
 			} else {
 				pkt.Payload = buildFullPayload(foundLayerTypes, IPVersion, eth, ip4, ip6, tcp, udp, sctp)
-				extractCID(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, pkt.Payload)
+				pkt.CID = extractCID(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, pkt.Payload)
 			}
 
 		case layers.LayerTypeSCTP:
@@ -922,9 +939,9 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, eth *l
 				pkt.Payload = buildFullPayload(foundLayerTypes, IPVersion, eth, ip4, ip6, tcp, udp, sctp)
 			}
 			atomic.AddUint64(&d.sctpCount, 1)
-			log.Logger.Debugf("payload - SCTP: %v", pkt)
+			log.Logger.Infof("payload - SCTP: %v", pkt)
 
-			extractCID(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, pkt.Payload)
+			pkt.CID = extractCID(pkt.SrcIP, pkt.SrcPort, pkt.DstIP, pkt.DstPort, pkt.Payload)
 		}
 
 		var cPos int
@@ -941,8 +958,8 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, eth *l
 					Tmsec:     pkt.Tmsec,
 					ProtoType: pkt.ProtoType,
 					CID:       pkt.CID,
-					Vlan:      pkt.Vlan,
-					NodeName:  pkt.NodeName,
+					// Vlan:      pkt.Vlan,
+					NodeName: pkt.NodeName,
 				}
 				pkt2.Payload = elem.Value.([]byte)
 				if cPos = bytes.Index(pkt2.Payload, []byte("CSeq")); cPos > -1 {
@@ -964,9 +981,9 @@ func (d *Decoder) processTransport(foundLayerTypes *[]gopacket.LayerType, eth *l
 			}
 		} else {
 			if cPos = bytes.Index(pkt.Payload, []byte("CSeq")); cPos > -1 {
-				pkt.ProtoType = 1
+				pkt.ProtoType = ProtoTypeSIP
 			} else if cPos = bytes.Index(pkt.Payload, []byte("Cseq")); cPos > -1 {
-				pkt.ProtoType = 1
+				pkt.ProtoType = ProtoTypeSIP
 			}
 			if cPos > 16 {
 				if s := bytes.Index(pkt.Payload[:cPos], []byte("Sip0")); s > -1 {

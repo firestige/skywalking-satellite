@@ -62,7 +62,7 @@ func cacheCID(srcIP []byte, rtcpIP []byte, rtcpPort []byte, callID []byte) {
 // It will only use the first port from multi port notation.
 // The function makes some assumptions about the well-formedness of the SDP for faster parsing.
 // Key parts will be separated by a single space.
-func extractCID(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payload []byte) {
+func extractCID(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payload []byte) []byte {
 	// TODO: improve multipart handling.
 	var (
 		srcIPb      = []byte(srcIP.String()) // source IP as text as bytes.
@@ -75,7 +75,7 @@ func extractCID(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payl
 	// Do we have a header separator?
 	posHeaderEnd := bytes.Index(payload, []byte("\r\n\r\n"))
 	if posHeaderEnd < 0 {
-		return
+		return nil
 	}
 	// Split in headers and content
 	headers := payload[:posHeaderEnd+4] // keep separator
@@ -85,20 +85,20 @@ func extractCID(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payl
 	contentType, err = getHeaderValue(contentTypeHeaderNames, headers)
 	if err != nil {
 		// Content-Type only exists if there is content, no need for logging.
-		return
+		return nil
 	}
 	if !bytes.HasPrefix(contentType, []byte("application/sdp")) {
 		// Not SDP. It is multipart?
 		if !bytes.HasPrefix(contentType, []byte("multipart/")) {
 			// Not multipart, nothing to do.
-			return
+			return nil
 		}
 		// It is multipart.
 		multipart = true
 		// Multipart must contain SDP.
 		if !bytes.Contains(payload, []byte("applicaton/sdp")) {
 			// No SDP, nothing to do.
-			return
+			return nil
 		}
 		log.Logger.WithField("source", "sdp").Debugf("Found sdp in multipart message. srcIP=%v, srcPort=%v, dstIP=%v, dstPort=%v",
 			srcIP, srcPort, dstIP, dstPort)
@@ -109,7 +109,7 @@ func extractCID(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payl
 	if err != nil || len(callID) == 0 {
 		log.Logger.WithField("source", "sdp").Debugf("No or fishy Call-ID. srcIP=%v, srcPort=%v, dstIP=%v, dstPort=%v, headers=%q",
 			srcIP, srcPort, dstIP, dstPort, headers)
-		return
+		return nil
 	}
 
 	// Loop through all content lines.
@@ -241,6 +241,7 @@ sdpLoop:
 	if len(rtcpIP) > 0 && len(rtcpPort) > 0 {
 		cacheCID(srcIPb, rtcpIP, rtcpPort, callID)
 	}
+	return callID
 }
 
 // correlateRTCP will try to correlate RTCP data with SIP messages.
@@ -367,4 +368,26 @@ func correlateLOG(payload []byte) (byte, []byte) {
 		return 100, callID
 	}
 	return 0, nil
+}
+
+// correlateRTP will try to correlate RTP data with SIP messages.
+// It will return the parsed RTP info (可选)和关联的 Call-ID (CID)。
+// 查询顺序：先 srcIP+srcPort，再 dstIP+dstPort。
+// Key parts will be separated by a single space.
+func correlateRTP(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16) []byte {
+	var cid = make([]byte, 0, 80)
+	keySrc := []byte(srcIP.String() + " " + strconv.Itoa(int(srcPort)))
+	keyDst := []byte(dstIP.String() + " " + strconv.Itoa(int(dstPort)))
+
+	cidVal, err := cidCache.GetWithBuf(keySrc, cid[:0])
+	if err == nil && len(cidVal) > 0 {
+		return cidVal
+	}
+	cidVal, err = cidCache.GetWithBuf(keyDst, cid[:0])
+	if err == nil && len(cidVal) > 0 {
+		return cidVal
+	}
+	log.Logger.WithField("source", "rtp").Debugf("No correlationID for srcIP=%v, srcPort=%v, dstIP=%v, dstPort=%v",
+		srcIP, srcPort, dstIP, dstPort)
+	return nil
 }
