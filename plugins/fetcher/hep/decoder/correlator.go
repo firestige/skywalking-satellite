@@ -2,6 +2,7 @@ package decoder
 
 import (
 	"bytes"
+	"encoding/binary"
 	"net"
 	"strconv"
 
@@ -374,20 +375,59 @@ func correlateLOG(payload []byte) (byte, []byte) {
 // It will return the parsed RTP info (可选)和关联的 Call-ID (CID)。
 // 查询顺序：先 srcIP+srcPort，再 dstIP+dstPort。
 // Key parts will be separated by a single space.
-func correlateRTP(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16) []byte {
-	var cid = make([]byte, 0, 80)
-	keySrc := []byte(srcIP.String() + " " + strconv.Itoa(int(srcPort)))
-	keyDst := []byte(dstIP.String() + " " + strconv.Itoa(int(dstPort)))
+func correlateRTP(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payload []byte) []byte {
+	var cid = make([]byte, 0, 60)
 
-	cidVal, err := cidCache.GetWithBuf(keySrc, cid[:0])
-	if err == nil && len(cidVal) > 0 {
-		return cidVal
+	rtp, err := protos.NewRTP(payload)
+	if err != nil {
+		log.Logger.WithField("source", "rtp").Infof("Parsing rtp returned error: %v. srcIP=%v, srcPort=%v, dstIP=%v, dstPort=%v",
+			err, srcIP, srcPort, dstIP, dstPort)
+		return nil
 	}
-	cidVal, err = cidCache.GetWithBuf(keyDst, cid[:0])
-	if err == nil && len(cidVal) > 0 {
-		return cidVal
+
+	ssrcBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(ssrcBytes, rtp.Ssrc)
+
+	srcIPString := srcIP.String()
+	srcPortString := strconv.Itoa(int(srcPort) + 1)
+	srcKey := []byte(srcIPString + " " + srcPortString)
+	rtcpKey := bytes.Join([][]byte{srcKey, ssrcBytes}, []byte(" "))
+
+	cid, err = rtcpCache.GetWithBuf(rtcpKey, cid[:0])
+	if err == nil && len(cid) > 0 {
+		log.Logger.WithField("source", "rtp").Infof("Found key=%q value=%q in rtcpCache for srcIP=%v, srcPort=%v, dstIP=%v, dstPort=%v",
+			rtcpKey, cid, srcIP, srcPort, dstIP, dstPort)
+		return cid
 	}
-	log.Logger.WithField("source", "rtp").Debugf("No correlationID for srcIP=%v, srcPort=%v, dstIP=%v, dstPort=%v",
+
+	cid, err = cidCache.GetWithBuf(srcKey, cid[:0])
+	if err == nil && len(cid) > 0 {
+		log.Logger.WithField("source", "rtp").Infof("Found key=%q value=%q in cidCache for srcIP=%v, srcPort=%v, dstIP=%v, dstPort=%v",
+			srcKey, cid, srcIP, srcPort, dstIP, dstPort)
+		err = rtcpCache.Set(rtcpKey, cid, rtcpCacheTime)
+		if err != nil {
+			log.Logger.Warnf("%v", err)
+			return nil
+		}
+		return cid
+	}
+
+	dstIPString := dstIP.String()
+	dstPortString := strconv.Itoa(int(dstPort) + 1)
+	dstKey := []byte(dstIPString + " " + dstPortString)
+
+	cid, err = cidCache.GetWithBuf(dstKey, cid[:0])
+	if err == nil && len(cid) > 0 {
+		log.Logger.WithField("source", "rtp").Infof("Found key=%q value=%q in cidCache for srcIP=%v, srcPort=%v, dstIP=%v, dstPort=%v",
+			srcKey, cid, srcIP, srcPort, dstIP, dstPort)
+		err = rtcpCache.Set(rtcpKey, cid, rtcpCacheTime)
+		if err != nil {
+			log.Logger.Warnf("%v", err)
+			return nil
+		}
+		return cid
+	}
+	log.Logger.WithField("source", "rtp").Infof("No correlationID for srcIP=%v, srcPort=%v, dstIP=%v, dstPort=%v",
 		srcIP, srcPort, dstIP, dstPort)
 	return nil
 }
